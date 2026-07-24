@@ -1,0 +1,31 @@
+[project]
+name = "genie-mlflow-app"
+version = "0.1.0"
+description = "Streamlit app + quickstart to trace Genie conversations, evaluate them with LLM judges, and generate improvement suggestions on Databricks."
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit",
+    "mlflow[databricks,genai]",
+    "databricks-sdk",
+    "databricks-openai",
+]
+
+[project.scripts]
+quickstart = "scripts.quickstart:main"
+create-genie-space = "scripts.create_genie_space:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["scripts"]
+
+[dependency-groups]
+# Extra deps only the setup CLIs need (not the deployed app runtime).
+setup = [
+    "ruamel.yaml>=0.18.0",
+]
+
+[tool.uv]
+default-groups = ["setup"]

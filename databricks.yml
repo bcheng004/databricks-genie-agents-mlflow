@@ -1,0 +1,33 @@
+bundle:
+  name: genie-mlflow-app
+
+include:
+  - resources/*.yml
+
+variables:
+  warehouse_id:
+    description: "SQL warehouse ID used for MLflow trace queries."
+    default: "9bbc027402111984"
+  judge_model:
+    description: "Serving endpoint used as the default LLM judge."
+    default: "databricks-claude-sonnet-5"
+  analyzer_model:
+    description: "Serving endpoint used to generate Genie space improvement suggestions."
+    default: "databricks-claude-sonnet-4-6"
+  genie_space_id:
+    description: "Genie Space ID the app traces and analyzes."
+    default: "01f17bd5fc55147394d6b0cd2152860c"
+
+targets:
+  dev:
+    default: true
+    mode: development
+    workspace:
+      profile: mlflow-workshop
+      host: https://fevm-workshop-guy.cloud.databricks.com
+
+  prod:
+    mode: production
+    workspace:
+      profile: mlflow-workshop
+      host: https://fevm-workshop-guy.cloud.databricks.com
