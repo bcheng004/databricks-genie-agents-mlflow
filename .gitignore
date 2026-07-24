@@ -22,3 +22,4 @@ client/src/fastapi_client/
 
 # uv / bun lock noise is intentionally NOT ignored (uv.lock, bun.lock are committed)
 .omc
+.isaac

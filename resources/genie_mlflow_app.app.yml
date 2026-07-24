@@ -1,0 +1,26 @@
+resources:
+  apps:
+    genie_mlflow:
+      name: genie-mlflow-${bundle.target}
+      description: "Streamlit app: configure a UC-managed MLflow experiment, trace Genie conversations, evaluate with LLM judges, and generate improvement suggestions."
+      source_code_path: ../app
+      user_api_scopes:
+        - genie
+        - sql
+        - model-serving
+      resources:
+        - name: sql-warehouse
+          description: "Warehouse used for MLflow trace queries and schema creation."
+          sql_warehouse:
+            id: ${var.warehouse_id}
+            permission: CAN_USE
+        - name: judge-model
+          description: "Foundation model endpoint used as the default LLM judge."
+          serving_endpoint:
+            name: ${var.judge_model}
+            permission: CAN_QUERY
+        - name: analyzer-model
+          description: "Foundation model endpoint used to generate Genie space improvement suggestions."
+          serving_endpoint:
+            name: ${var.analyzer_model}
+            permission: CAN_QUERY
