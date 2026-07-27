@@ -165,3 +165,19 @@ def genie_space_id_input() -> str:
         placeholder="e.g. 01f0123456789abc",
         help="The Genie space ID (visible in the Genie space URL).",
     )
+
+
+def get_guideline_judges() -> dict[str, list[str]]:
+    """Return the session's Guidelines judges ({name: [guideline, ...]}).
+
+    Seeded once from the notebook-02 presets so the Evaluate page shows the
+    built-in Genie judges by default; the "Create Guideline Judge" page adds to
+    or removes from this same dict, shared across pages via st.session_state.
+    """
+    from guideline_presets import GUIDELINE_JUDGES
+
+    if "guideline_judges" not in st.session_state:
+        st.session_state["guideline_judges"] = {
+            name: list(guidelines) for name, guidelines in GUIDELINE_JUDGES.items()
+        }
+    return st.session_state["guideline_judges"]
