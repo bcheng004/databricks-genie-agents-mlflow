@@ -19,7 +19,7 @@ from mlflow.genai.scorers import (
     scorer,
 )
 
-from common import list_judge_models, require_experiment
+from common import get_guideline_judges, list_judge_models, require_experiment
 
 st.title("⚖️ Evaluate Genie Agents")
 st.caption(
@@ -158,14 +158,23 @@ use_relevance = st.checkbox("RelevanceToQuery", value=True)
 use_safety = st.checkbox("Safety", value=True)
 use_groundedness = st.checkbox("RetrievalGroundedness", value=False)
 
-st.markdown("**Guidelines judges (from notebook 02)**")
+st.markdown("**Guidelines judges**")
 guideline_judge_model = st.selectbox(
     "Model for Guidelines judges (Default uses each judge's built-in model)",
     judge_model_options,
     key="guideline_judge_model",
 )
-use_response_quality = st.checkbox("genie_response_quality", value=True)
-use_sql_quality = st.checkbox("genie_sql_quality", value=True)
+guideline_judges = get_guideline_judges()
+if guideline_judges:
+    selected_guidelines = {
+        name: st.checkbox(name, value=True, key=f"guideline_{name}")
+        for name in guideline_judges
+    }
+else:
+    selected_guidelines = {}
+    st.caption(
+        "No guideline judges yet — add some on the **Create Guideline Judge** page."
+    )
 
 st.subheader("Code-based scorers")
 use_has_response = st.checkbox("has_response", value=True)
@@ -192,37 +201,15 @@ if use_safety:
 if use_groundedness:
     scorers.append(RetrievalGroundedness(**builtin_mkw))
 
-if use_response_quality:
-    scorers.append(
-        Guidelines(
-            name="genie_response_quality",
-            guidelines=[
-                "The response must directly address the user's data question "
-                "rather than giving a vague or generic reply.",
-                "If SQL was generated, the response must include a data-driven "
-                "answer, not just echo the SQL query back.",
-                "The response must not say 'I cannot answer' when the question "
-                "is about data that should be available in the tables.",
-            ],
-            **guideline_mkw,
+for name, selected in selected_guidelines.items():
+    if selected:
+        scorers.append(
+            Guidelines(
+                name=name,
+                guidelines=guideline_judges[name],
+                **guideline_mkw,
+            )
         )
-    )
-
-if use_sql_quality:
-    scorers.append(
-        Guidelines(
-            name="genie_sql_quality",
-            guidelines=[
-                "If SQL is present, it must use appropriate aggregation "
-                "functions (SUM, COUNT, AVG) matching the user's intent.",
-                "The SQL must include appropriate WHERE clauses to filter "
-                "data as the user requested.",
-                "The SQL must not use SELECT * on large tables without a "
-                "LIMIT or specific filter.",
-            ],
-            **guideline_mkw,
-        )
-    )
 
 
 @scorer

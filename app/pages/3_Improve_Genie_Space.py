@@ -1,4 +1,4 @@
-"""Page 3 — Improve Genie Space (notebook 03).
+"""Page 3 — Improve Genie Agents (notebook 03).
 
 Loads failed traces from the experiment, reads the Genie Space configuration,
 and uses an LLM to generate specific, copy-paste-ready improvement suggestions.
@@ -10,9 +10,15 @@ import os
 import mlflow
 import streamlit as st
 
-from common import genie_space_id_input, get_openai_client, get_workspace_client, require_experiment
+from common import (
+    genie_space_id_input,
+    get_openai_client,
+    get_workspace_client,
+    list_judge_models,
+    require_experiment,
+)
 
-st.title("🛠️ Improve Genie Space")
+st.title("🛠️ Improve Genie Agents")
 st.caption(
     "Loads traces that failed evaluation, reads your Genie Space config, "
     "and asks an LLM to generate targeted improvement suggestions."
@@ -23,9 +29,16 @@ st.info(f"Experiment: `{experiment_name}`")
 
 space_id = genie_space_id_input()
 
-analyzer_model = st.text_input(
+analyzer_model_options = list_judge_models()
+_default_analyzer = os.environ.get("ANALYZER_MODEL", "databricks-claude-sonnet-4-6")
+analyzer_model = st.selectbox(
     "Analyzer model",
-    value=os.environ.get("ANALYZER_MODEL", "databricks-claude-sonnet-4-6"),
+    analyzer_model_options,
+    index=(
+        analyzer_model_options.index(_default_analyzer)
+        if _default_analyzer in analyzer_model_options
+        else 0
+    ),
     help="Databricks Foundation Model API endpoint used to generate suggestions.",
 )
 
@@ -40,9 +53,9 @@ if not space_id.strip():
     st.error("Please enter a Genie Space ID.")
     st.stop()
 
-client = get_openai_client()
-mlflow.set_experiment(experiment_name)
 w = get_workspace_client()
+client = get_openai_client(w)
+mlflow.set_experiment(experiment_name)
 
 # Step 1: load failed traces
 with st.spinner("Loading traces with failures…"):

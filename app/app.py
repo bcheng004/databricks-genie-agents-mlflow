@@ -18,13 +18,18 @@ st.navigation(
             default=True,
         ),
         st.Page(
+            "pages/4_Create_Guideline_Judge.py",
+            title="Create Guideline Judge",
+            icon="🧭",
+        ),
+        st.Page(
             "pages/2_Evaluate_With_Judges.py",
             title="Evaluate With Judges",
             icon="⚖️",
         ),
         st.Page(
             "pages/3_Improve_Genie_Space.py",
-            title="Improve Genie Space",
+            title="Improve Genie Agents",
             icon="🛠️",
         ),
     ]

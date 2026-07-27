@@ -64,13 +64,16 @@ def get_workspace_client() -> WorkspaceClient:
     return WorkspaceClient()
 
 
-def get_openai_client() -> DatabricksOpenAI:
-    """Return a DatabricksOpenAI client authenticated as the logged-in user (OBO)."""
-    token = get_obo_token()
-    host = os.environ.get("DATABRICKS_HOST", "")
-    if token and host:
-        return DatabricksOpenAI(api_key=token, base_url=f"{host}/serving-endpoints")
-    return DatabricksOpenAI()
+def get_openai_client(w: WorkspaceClient | None = None) -> DatabricksOpenAI:
+    """Return a DatabricksOpenAI client authenticated as the logged-in user (OBO).
+
+    DatabricksOpenAI authenticates from a WorkspaceClient (via its http_client),
+    not an ``api_key`` — passing ``api_key`` collides with the value it sets
+    internally. So we hand it the OBO-authenticated WorkspaceClient, which
+    carries the logged-in user's credentials in Databricks Apps (and the local
+    profile otherwise).
+    """
+    return DatabricksOpenAI(workspace_client=w or get_workspace_client())
 
 
 def init_mlflow() -> None:
@@ -162,3 +165,19 @@ def genie_space_id_input() -> str:
         placeholder="e.g. 01f0123456789abc",
         help="The Genie space ID (visible in the Genie space URL).",
     )
+
+
+def get_guideline_judges() -> dict[str, list[str]]:
+    """Return the session's Guidelines judges ({name: [guideline, ...]}).
+
+    Seeded once from the notebook-02 presets so the Evaluate page shows the
+    built-in Genie judges by default; the "Create Guideline Judge" page adds to
+    or removes from this same dict, shared across pages via st.session_state.
+    """
+    from guideline_presets import GUIDELINE_JUDGES
+
+    if "guideline_judges" not in st.session_state:
+        st.session_state["guideline_judges"] = {
+            name: list(guidelines) for name, guidelines in GUIDELINE_JUDGES.items()
+        }
+    return st.session_state["guideline_judges"]
