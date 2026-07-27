@@ -1,4 +1,4 @@
-"""Page 3 — Improve Genie Space (notebook 03).
+"""Page 3 — Improve Genie Agents (notebook 03).
 
 Loads failed traces from the experiment, reads the Genie Space configuration,
 and uses an LLM to generate specific, copy-paste-ready improvement suggestions.
@@ -18,7 +18,7 @@ from common import (
     require_experiment,
 )
 
-st.title("🛠️ Improve Genie Space")
+st.title("🛠️ Improve Genie Agents")
 st.caption(
     "Loads traces that failed evaluation, reads your Genie Space config, "
     "and asks an LLM to generate targeted improvement suggestions."

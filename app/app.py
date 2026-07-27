@@ -29,7 +29,7 @@ st.navigation(
         ),
         st.Page(
             "pages/3_Improve_Genie_Space.py",
-            title="Improve Genie Space",
+            title="Improve Genie Agents",
             icon="🛠️",
         ),
     ]
