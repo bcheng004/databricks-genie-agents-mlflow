@@ -64,13 +64,16 @@ def get_workspace_client() -> WorkspaceClient:
     return WorkspaceClient()
 
 
-def get_openai_client() -> DatabricksOpenAI:
-    """Return a DatabricksOpenAI client authenticated as the logged-in user (OBO)."""
-    token = get_obo_token()
-    host = os.environ.get("DATABRICKS_HOST", "")
-    if token and host:
-        return DatabricksOpenAI(api_key=token, base_url=f"{host}/serving-endpoints")
-    return DatabricksOpenAI()
+def get_openai_client(w: WorkspaceClient | None = None) -> DatabricksOpenAI:
+    """Return a DatabricksOpenAI client authenticated as the logged-in user (OBO).
+
+    DatabricksOpenAI authenticates from a WorkspaceClient (via its http_client),
+    not an ``api_key`` — passing ``api_key`` collides with the value it sets
+    internally. So we hand it the OBO-authenticated WorkspaceClient, which
+    carries the logged-in user's credentials in Databricks Apps (and the local
+    profile otherwise).
+    """
+    return DatabricksOpenAI(workspace_client=w or get_workspace_client())
 
 
 def init_mlflow() -> None:
