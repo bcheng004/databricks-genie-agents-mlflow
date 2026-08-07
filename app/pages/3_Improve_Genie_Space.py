@@ -174,7 +174,6 @@ def analyze_genie_agent(user_prompt: str, sys_prompt: str) -> str:
             {"role": "user", "content": user_prompt},
         ],
         max_tokens=8000,
-        temperature=0.1,
     )
     return response.choices[0].message.content
 
