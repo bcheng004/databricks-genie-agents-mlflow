@@ -1,20 +1,20 @@
-"""Attach a Genie space to the app (reuse an existing one or create a new one).
+"""Attach a Genie agent to the app (reuse an existing one or create a new one).
 
-Writes the resolved GENIE_SPACE_ID into .env, app/app.yaml (read by the running
-app), and the databricks.yml `genie_space_id` bundle variable default.
+Writes the resolved GENIE_AGENT_ID into .env, app/app.yaml (read by the running
+app), and the databricks.yml `genie_agent_id` bundle variable default.
 
-Run with no flags to be prompted for the profile and the space (attach an
+Run with no flags to be prompted for the profile and the agent (attach an
 existing one by ID, or reuse/create one by title):
 
-    uv run create-genie-space
+    uv run create-genie-agent
 
 Or pass flags to skip the prompts (useful for CI):
 
-    # Wire up a space you already have:
-    uv run create-genie-space --space-id 01f0123456789abc
+    # Wire up an agent you already have:
+    uv run create-genie-agent --agent-id 01f0123456789abc
 
     # Reuse by title, or create if not found:
-    uv run create-genie-space --title "Sales Genie" --warehouse-id abc123 \
+    uv run create-genie-agent --title "Sales Genie" --warehouse-id abc123 \
         --table main.sales.orders --table main.sales.customers
 """
 
@@ -34,7 +34,7 @@ from ._common import (
     validate_profile,
 )
 
-_DEFAULT_DESCRIPTION = "Genie space traced and evaluated by the Genie MLflow app."
+_DEFAULT_DESCRIPTION = "Genie agent traced and evaluated by the Genie MLflow app."
 
 
 def parse_args() -> argparse.Namespace:
@@ -45,38 +45,38 @@ def parse_args() -> argparse.Namespace:
         help="Databricks CLI profile. Prompted for interactively if omitted.",
     )
     parser.add_argument(
-        "--space-id",
-        help="Existing Genie space ID to attach (skips lookup/creation).",
+        "--agent-id",
+        help="Existing Genie agent ID to attach (skips lookup/creation).",
     )
-    parser.add_argument("--title", help="Space title to reuse-by-name or create.")
+    parser.add_argument("--title", help="Agent title to reuse-by-name or create.")
     parser.add_argument(
         "--warehouse-id",
         default=None,
-        help="SQL warehouse for a newly created space. Prompted if needed.",
+        help="SQL warehouse for a newly created agent. Prompted if needed.",
     )
     parser.add_argument(
         "--table",
         action="append",
         default=None,
         dest="tables",
-        help="Fully-qualified table (catalog.schema.table) for a new space; repeatable.",
+        help="Fully-qualified table (catalog.schema.table) for a new agent; repeatable.",
     )
     parser.add_argument(
         "--description",
         default=None,
-        help="Description for a newly created space.",
+        help="Description for a newly created agent.",
     )
     return parser.parse_args()
 
 
-def find_space_by_title(w, title: str):
-    """Return the first space whose title matches, paging through all spaces."""
+def find_agent_by_title(w, title: str):
+    """Return the first agent whose title matches, paging through all agents."""
     page_token = None
     while True:
         resp = w.genie.list_spaces(page_token=page_token)
-        for space in resp.spaces or []:
-            if (space.title or "") == title:
-                return space
+        for agent in resp.spaces or []:
+            if (agent.title or "") == title:
+                return agent
         page_token = resp.next_page_token
         if not page_token:
             return None
@@ -99,9 +99,9 @@ def prompt_tables(provided: list[str] | None) -> list[str]:
         tables.append(line)
 
 
-def create_space(w, args) -> str:
-    """Create a new Genie space, prompting for any missing inputs."""
-    title = prompt_value("Space title", args.title)
+def create_agent(w, args) -> str:
+    """Create a new Genie agent, prompting for any missing inputs."""
+    title = prompt_value("Agent title", args.title)
     warehouse_id = prompt_value(
         "Warehouse ID", args.warehouse_id, "MLFLOW_TRACING_SQL_WAREHOUSE_ID"
     )
@@ -110,54 +110,53 @@ def create_space(w, args) -> str:
         "Description", args.description, fallback=_DEFAULT_DESCRIPTION
     )
 
-    serialized_space = {
+    serialized_agent = {
         "data_sources": {"tables": [{"identifier": t} for t in tables]},
         "instructions": {"text_instructions": [], "example_question_sqls": []},
     }
-    print(f"  Creating Genie space '{title}' with {len(tables)} table(s) …")
-    space = w.genie.create_space(
+    print(f"  Creating Genie agent '{title}' with {len(tables)} table(s) …")
+    agent = w.genie.create_space(
         warehouse_id=warehouse_id,
-        serialized_space=json.dumps(serialized_space),
+        serialized_space=json.dumps(serialized_agent),
         description=description,
         title=title,
     )
-    return space.space_id
+    return agent.space_id
 
 
 def choose_action(args) -> str:
     """Decide reuse-vs-create. Flags short-circuit; otherwise prompt interactively."""
-    if args.space_id:
+    if args.agent_id:
         return "attach"
     if args.title:
         return "title"
     while True:
-        print("\nGenie space setup:")
-        print("  1. Attach an existing space by ID")
-        print("  2. Reuse or create a space by title")
+        print("\nGenie agent setup:")
+        print("  1. Attach an existing agent by ID")
+        print("  2. Reuse or create an agent by title")
         choice = input("Choose an option [1/2]: ").strip()
         if choice == "1":
-            args.space_id = prompt_value("Genie space ID", None)
+            args.agent_id = prompt_value("Genie agent ID", None)
             return "attach"
         if choice == "2":
-            args.title = prompt_value("Space title", None)
+            args.title = prompt_value("Agent title", None)
             return "title"
         print("Enter 1 or 2.")
 
 
-def resolve_space_id(w, args) -> str:
+def resolve_agent_id(w, args) -> str:
     action = choose_action(args)
 
     if action == "attach":
-        # Validate it exists / is readable.
-        space = w.genie.get_space(space_id=args.space_id)
-        print(f"  Attaching existing space: {space.title} ({args.space_id})")
-        return args.space_id
+        agent = w.genie.get_space(space_id=args.agent_id)
+        print(f"  Attaching existing agent: {agent.title} ({args.agent_id})")
+        return args.agent_id
 
-    existing = find_space_by_title(w, args.title)
+    existing = find_agent_by_title(w, args.title)
     if existing:
-        print(f"  Reusing space by title: {existing.title} ({existing.space_id})")
+        print(f"  Reusing agent by title: {existing.title} ({existing.space_id})")
         return existing.space_id
-    return create_space(w, args)
+    return create_agent(w, args)
 
 
 def main() -> None:
@@ -174,14 +173,14 @@ def main() -> None:
     from databricks.sdk import WorkspaceClient
 
     w = WorkspaceClient(profile=profile)
-    space_id = resolve_space_id(w, args)
+    agent_id = resolve_agent_id(w, args)
 
-    print("Writing GENIE_SPACE_ID to .env, app/app.yaml, databricks.yml …")
-    update_env_file("GENIE_SPACE_ID", space_id)
-    set_app_yaml_env({"GENIE_SPACE_ID": space_id})
-    set_bundle_variable_default("genie_space_id", space_id)
+    print("Writing GENIE_AGENT_ID to .env, app/app.yaml, databricks.yml …")
+    update_env_file("GENIE_AGENT_ID", agent_id)
+    set_app_yaml_env({"GENIE_AGENT_ID": agent_id})
+    set_bundle_variable_default("genie_agent_id", agent_id)
 
-    print(f"\nDone. GENIE_SPACE_ID = {space_id}")
+    print(f"\nDone. GENIE_AGENT_ID = {agent_id}")
 
 
 if __name__ == "__main__":

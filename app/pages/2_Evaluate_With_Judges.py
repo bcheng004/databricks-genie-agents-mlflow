@@ -6,20 +6,33 @@ judges, Guidelines judges, and code-based scorers.
 """
 
 import json
+import re
 
 import mlflow
 import pandas as pd
 import streamlit as st
-from mlflow.entities import Feedback
+from mlflow.entities import AssessmentError, Feedback
 from mlflow.genai.scorers import (
     Guidelines,
     RelevanceToQuery,
     RetrievalGroundedness,
     Safety,
-    scorer,
 )
 
-from common import get_guideline_judges, list_judge_models, require_experiment
+from code_search import (
+    MAX_RATIONALE_SNIPPET_CHARS,
+    NO_RESULTS,
+    CodeSearcher,
+    format_rows,
+    source_links,
+)
+from common import (
+    get_guideline_judges,
+    get_openai_client,
+    get_workspace_client,
+    list_judge_models,
+    require_experiment,
+)
 
 st.title("⚖️ Evaluate Genie Agents")
 st.caption(
@@ -85,13 +98,23 @@ def build_display(df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # Step 1 — Load traces
 # ---------------------------------------------------------------------------
+# Genie conversation traces are logged by page 1 under this span name. The
+# experiment also collects traces that are *not* Genie conversations and make no
+# sense to evaluate: mlflow.genai.evaluate() enables autologging, so every LLM
+# judge call lands here as a `DatabricksCompletions` trace, and the Improve page
+# logs `analyze_genie_space`. Those have no `question` input, so they'd show up
+# as blank rows and score meaninglessly — filter them out at search time.
+GENIE_TRACE_NAME = "genie_interaction"
+GENIE_TRACE_FILTER = f"tags.`mlflow.traceName` = '{GENIE_TRACE_NAME}'"
+
 st.subheader("Step 1 — Load traces")
-st.caption("Loads all traces in the experiment.")
+st.caption("Loads Genie conversation traces from your experiment.")
 
 if st.button("Load traces"):
     with st.spinner("Loading traces…"):
         st.session_state["eval_traces_df"] = mlflow.search_traces(
             locations=[experiment_id],
+            filter_string=GENIE_TRACE_FILTER,
             order_by=["timestamp DESC"],
             max_results=None,
         )
@@ -103,8 +126,8 @@ if traces_df is None:
 
 if len(traces_df) == 0:
     st.warning(
-        "No traces found in this experiment. "
-        "Run **Trace Genie Conversations** first."
+        "No Genie conversation traces found in this experiment. "
+        "Run **Trace Conversations** first."
     )
     st.stop()
 
@@ -177,8 +200,36 @@ else:
     )
 
 st.subheader("Code-based scorers")
-use_has_response = st.checkbox("has_response", value=True)
-use_no_error = st.checkbox("no_error", value=True)
+use_code_grounded = st.checkbox(
+    "code_grounded",
+    value=False,
+    help=(
+        "Retrieves code from the Lakebase BM25 code index for each question, then "
+        "asks an LLM whether the response is grounded in that code."
+    ),
+)
+if use_code_grounded:
+    code_grounded_model = st.selectbox(
+        "Model for code_grounded judge",
+        list_judge_models(),
+        key="code_grounded_model",
+        help="Foundation Model endpoint used to judge groundedness against the retrieved code.",
+    )
+    code_grounded_top_k = st.slider(
+        "Code snippets to retrieve per question",
+        min_value=1,
+        max_value=10,
+        value=5,
+        key="code_grounded_top_k",
+    )
+    with st.expander("Lakebase connection"):
+        try:
+            st.json(CodeSearcher(get_workspace_client()).connection_info())
+        except Exception as exc:
+            st.warning(f"Could not resolve the Lakebase endpoint: {exc}")
+else:
+    code_grounded_model = None
+    code_grounded_top_k = 5
 
 run = st.button("Run evaluation", type="primary", disabled=n_selected == 0)
 if n_selected == 0:
@@ -212,41 +263,224 @@ for name, selected in selected_guidelines.items():
         )
 
 
-@scorer
-def has_response(outputs) -> Feedback:
-    resp = outputs.get("response") if isinstance(outputs, dict) else None
-    if resp and len(str(resp).strip()) > 0:
-        return Feedback(value="yes", rationale=f"{len(resp)} chars")
-    return Feedback(value="no", rationale="No text response")
+# --- code_grounded ---------------------------------------------------------
+# The judge wording is deliberately explicit: a looser "is this based on the
+# snippets?" prompt votes yes on answers whose own rationale calls the API
+# fabricated. The labelled VERDICT line is what _verdict_of parses.
+_CODE_JUDGE_PROMPT = (
+    "You are an evaluation judge assessing whether an answer is grounded in "
+    "reference code snippets.\n\n"
+    "Answer 'yes' only if the substantive technical claims in the answer (APIs, "
+    "imports, function and class names, usage patterns) are supported by the "
+    "snippets.\n"
+    "Answer 'no' if the answer invents APIs or patterns that do not appear in "
+    "the snippets, or contradicts them.\n\n"
+    "Respond in exactly this format:\n"
+    "VERDICT: yes|no\n"
+    "RATIONALE: one or two sentences naming the specific APIs or patterns that "
+    "support your verdict."
+)
+
+# Reasoning models spend the budget on hidden reasoning before any answer text;
+# below ~1000 they return reasoning-only with finish_reason="length".
+_CODE_JUDGE_MAX_TOKENS = 2000
+
+_VERDICT_RE = re.compile(r"^\s*(?:verdict\s*:\s*)?(yes|no)\b", re.IGNORECASE)
 
 
-@scorer
-def no_error(outputs) -> Feedback:
-    err = outputs.get("error") if isinstance(outputs, dict) else None
-    if err and str(err).strip():
-        return Feedback(value="no", rationale=f"Error: {str(err)[:200]}")
-    return Feedback(value="yes", rationale="No errors")
+def _judge_text_of(content) -> str:
+    """Flatten a completion's content, keeping only answer text.
+
+    Reasoning models return a list of blocks; the verdict lives in the ``text``
+    blocks, while ``reasoning`` blocks carry an opaque (usually empty) summary.
+    """
+    if isinstance(content, list):
+        return "".join(
+            block.get("text", "") or ""
+            for block in content
+            if isinstance(block, dict) and block.get("type") != "reasoning"
+        )
+    return "" if content is None else str(content)
 
 
-if use_has_response:
-    scorers.append(has_response)
-if use_no_error:
-    scorers.append(no_error)
+def _verdict_of(judge_text: str) -> tuple[bool | None, str]:
+    """Return ``(verdict, rationale)``, or ``(None, ...)`` if there is no verdict."""
+    lines = judge_text.splitlines()
+    for i, line in enumerate(lines):
+        match = _VERDICT_RE.match(line)
+        if not match:
+            continue
+        verdict = match.group(1).lower() == "yes"
+        rest = _VERDICT_RE.sub("", line, count=1).strip(" :.-")
+        tail = "\n".join(lines[i + 1 :]).strip()
+        rationale = "\n".join(p for p in (rest, tail) if p).strip()
+        rationale = re.sub(r"^rationale\s*:\s*", "", rationale, flags=re.IGNORECASE)
+        return verdict, (rationale or judge_text)
+    return None, judge_text
 
-if not scorers:
+
+def _run_code_grounded(inputs, outputs) -> Feedback:
+    """Score one trace against the Lakebase BM25 code index.
+
+    Returns a ``Feedback``; the caller writes it with ``mlflow.log_feedback``
+    so the assessment lands directly on the existing trace rather than via an
+    evaluation run. Module-level ``code_searcher``, ``code_judge_client``,
+    ``code_judge_model``, and ``code_top_k`` are set before this is called.
+    """
+    question = inputs.get("question") or inputs.get("query") or str(inputs)
+
+    try:
+        rows = code_searcher.search_rows(question, top_k=code_top_k)
+    except Exception as exc:
+        # An unreachable index is a scorer failure, not evidence the answer was
+        # ungrounded — record it as an error, not a "no".
+        return Feedback(
+            error=AssessmentError(
+                error_code="CODE_SEARCH_UNAVAILABLE",
+                error_message=f"{type(exc).__name__}: {exc}",
+            )
+        )
+
+    if not rows:
+        return Feedback(value="no", rationale=NO_RESULTS)
+
+    snippets = format_rows(rows)
+
+    try:
+        response = code_judge_client.chat.completions.create(
+            model=code_judge_model,
+            messages=[
+                {"role": "system", "content": _CODE_JUDGE_PROMPT},
+                {
+                    "role": "user",
+                    "content": (
+                        f"Question: {question}\n\n"
+                        f"Answer: {outputs}\n\n"
+                        f"Reference code snippets:\n{snippets}"
+                    ),
+                },
+            ],
+            max_tokens=_CODE_JUDGE_MAX_TOKENS,
+        )
+    except Exception as exc:
+        return Feedback(
+            error=AssessmentError(
+                error_code="JUDGE_CALL_FAILED",
+                error_message=f"{type(exc).__name__}: {exc}",
+            )
+        )
+
+    choice = response.choices[0]
+    judge_text = _judge_text_of(choice.message.content).strip()
+    if not judge_text:
+        return Feedback(
+            error=AssessmentError(
+                error_code="JUDGE_NO_VERDICT",
+                error_message=(
+                    f"Judge returned no answer text "
+                    f"(finish_reason={choice.finish_reason!r}). Try a higher "
+                    f"max_tokens or a non-reasoning judge model."
+                ),
+            )
+        )
+
+    verdict, rationale = _verdict_of(judge_text)
+    if verdict is None:
+        return Feedback(
+            error=AssessmentError(
+                error_code="JUDGE_UNPARSEABLE_VERDICT",
+                error_message=f"No yes/no verdict in judge output: {judge_text[:300]!r}",
+            )
+        )
+
+    shown = snippets[:MAX_RATIONALE_SNIPPET_CHARS]
+    if len(snippets) > MAX_RATIONALE_SNIPPET_CHARS:
+        shown += "\n… (truncated)"
+
+    # "yes"/"no" rather than a bool, matching the judges above: MLflow groups
+    # assessments by value type, so a bool renders apart from the other scorers.
+    return Feedback(
+        value="yes" if verdict else "no",
+        rationale=(
+            f"{rationale}\n\n"
+            f"--- Sources ---\n{chr(10).join(source_links(rows))}\n\n"
+            f"--- Retrieved Code Snippets ---\n{shown}"
+        ),
+    )
+
+
+# code_grounded runs separately via log_feedback (not inside evaluate()) so it
+# never spawns an evaluation run and never auto-traces judge calls back into the
+# experiment. The connection objects are built here on the main thread where the
+# OBO token is readable; the scorer reads them as module-level globals at call time.
+if use_code_grounded:
+    try:
+        _w = get_workspace_client()
+        code_searcher = CodeSearcher(_w)
+        code_judge_client = get_openai_client(_w)
+        code_judge_model = code_grounded_model
+        code_top_k = code_grounded_top_k
+    except Exception as exc:
+        st.error(f"Could not set up the code_grounded scorer: {exc}")
+        st.stop()
+
+# Decide whether we have anything to run through evaluate() (everything except
+# code_grounded) and/or the direct log_feedback loop (only code_grounded).
+run_evaluate = bool(scorers)
+run_code_grounded = use_code_grounded
+
+if not run_evaluate and not run_code_grounded:
     st.error("Select at least one scorer before running evaluation.")
     st.stop()
 
-st.write(f"Evaluating **{n_selected}** trace(s) with **{len(scorers)}** scorer(s)…")
+n_scorers = len(scorers) + (1 if run_code_grounded else 0)
+st.write(f"Evaluating **{n_selected}** trace(s) with **{n_scorers}** scorer(s)…")
 
-with st.spinner("Running evaluation (this may take a few minutes)…"):
-    try:
-        result = mlflow.genai.evaluate(data=subset, scorers=scorers)
-    except Exception as exc:
-        st.error(f"Evaluation failed: {exc}")
-        st.stop()
+eval_run_id = None
+if run_evaluate:
+    with st.spinner("Running evaluation (this may take a few minutes)…"):
+        try:
+            result = mlflow.genai.evaluate(data=subset, scorers=scorers)
+            eval_run_id = result.run_id
+        except Exception as exc:
+            st.error(f"Evaluation failed: {exc}")
+            st.stop()
 
-st.success("Evaluation complete!")
+if run_code_grounded:
+    cols = subset.columns
+    in_col = "inputs" if "inputs" in cols else "request"
+    out_col = "outputs" if "outputs" in cols else "response"
+    id_col = "trace_id" if "trace_id" in cols else "request_id"
+
+    progress = st.progress(0.0, text="Scoring with code_grounded…")
+    n = len(subset)
+    n_ok, n_err = 0, 0
+    for i, (_, row) in enumerate(subset.iterrows()):
+        trace_id = str(row.get(id_col, ""))
+        inputs = _parse(row.get(in_col))
+        outputs = _parse(row.get(out_col))
+        fb = _run_code_grounded(inputs, outputs)
+        try:
+            mlflow.log_feedback(
+                trace_id=trace_id,
+                name="code_grounded",
+                value=fb.feedback.value if fb.error is None else None,
+                error=fb.error,
+                rationale=fb.rationale,
+            )
+            n_ok += 1
+        except Exception as exc:
+            st.warning(f"Could not write feedback for trace {trace_id}: {exc}")
+            n_err += 1
+        progress.progress((i + 1) / n, text=f"code_grounded: {i + 1}/{n}")
+    progress.empty()
+    if n_err:
+        st.warning(f"code_grounded: {n_ok} written, {n_err} failed.")
+    else:
+        st.success(f"code_grounded written to **{n_ok}** trace(s).")
+
+if run_evaluate:
+    st.success("Evaluation complete!")
 
 
 def _assessment_fields(a) -> tuple[str, object, str]:
@@ -273,54 +507,58 @@ def _assessment_fields(a) -> tuple[str, object, str]:
     return str(name), value, ("" if rationale is None else str(rationale))
 
 
-def build_score_tables(run_id: str) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Return (scores_df, rationales_df) with one row per evaluated trace.
+def build_score_tables(eval_df: pd.DataFrame) -> pd.DataFrame:
+    """Return one row per (trace × scorer) with Question, Scorer, Value, Rationale.
 
-    scores_df:     Question + one column per scorer (its value) + Trace ID.
-    rationales_df: long form (Trace ID, Scorer, Value, Rationale) for detail.
+    Reads assessments directly from the trace objects in ``eval_df``, which were
+    freshly loaded from the server after both evaluate() and log_feedback() ran.
     """
-    df = mlflow.search_traces(run_id=run_id)
-
-    cols = df.columns
+    cols = eval_df.columns
     in_col = "inputs" if "inputs" in cols else "request"
     id_col = "trace_id" if "trace_id" in cols else "request_id"
 
-    score_rows, rationale_rows = [], []
-    for _, r in df.iterrows():
+    rows = []
+    for _, r in eval_df.iterrows():
         req = _parse(r.get(in_col))
         trace_id = str(r.get(id_col, ""))
         question = _short(req.get("question"), 100)
 
-        row = {"Question": question}
         for a in r.get("assessments") or []:
             name, value, rationale = _assessment_fields(a)
-            row[name] = value
-            rationale_rows.append(
+            rows.append(
                 {
-                    "Trace ID": trace_id,
+                    "Question": question,
                     "Scorer": name,
                     "Value": value,
                     "Rationale": rationale,
+                    "Trace ID": trace_id,
                 }
             )
-        row["Trace ID"] = trace_id
-        score_rows.append(row)
 
-    return pd.DataFrame(score_rows), pd.DataFrame(rationale_rows)
+    return pd.DataFrame(rows)
 
 
 st.subheader("Per-trace scores")
 try:
-    scores_df, rationales_df = build_score_tables(result.run_id)
+    # Re-fetch the evaluated traces so log_feedback() assessments are included.
+    id_col = "trace_id" if "trace_id" in subset.columns else "request_id"
+    evaluated_ids = [str(v) for v in subset[id_col]]
+    refreshed = mlflow.search_traces(
+        locations=[experiment_id],
+        filter_string=GENIE_TRACE_FILTER,
+        order_by=["timestamp DESC"],
+        max_results=None,
+    )
+    # Keep only the rows we just evaluated.
+    refreshed = refreshed[refreshed[id_col].astype(str).isin(set(evaluated_ids))]
+    results_df = build_score_tables(refreshed)
 except Exception as exc:
     st.warning(f"Could not load per-trace results: {exc}")
-    scores_df, rationales_df = pd.DataFrame(), pd.DataFrame()
+    results_df = pd.DataFrame()
 
-if len(scores_df):
-    st.caption("One row per trace; one column per scorer.")
-    st.dataframe(scores_df, use_container_width=True, hide_index=True)
-    with st.expander("Rationales (per trace × scorer)"):
-        st.dataframe(rationales_df, use_container_width=True, hide_index=True)
+if len(results_df):
+    st.caption("One row per trace × scorer, with rationale inline.")
+    st.dataframe(results_df, use_container_width=True, hide_index=True)
 else:
     st.info("No per-trace assessments were returned for this run.")
 

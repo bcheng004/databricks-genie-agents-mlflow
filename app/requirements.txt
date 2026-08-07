@@ -2,3 +2,4 @@ streamlit>=1.35
 mlflow[databricks,genai]
 databricks-sdk
 databricks-openai
+psycopg[binary]>=3.1.0

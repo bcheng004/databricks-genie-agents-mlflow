@@ -1,6 +1,6 @@
 """Page 3 — Improve Genie Agents (notebook 03).
 
-Loads failed traces from the experiment, reads the Genie Space configuration,
+Loads failed traces from the experiment, reads the Genie agent configuration,
 and uses an LLM to generate specific, copy-paste-ready improvement suggestions.
 """
 
@@ -11,7 +11,7 @@ import mlflow
 import streamlit as st
 
 from common import (
-    genie_space_id_input,
+    genie_agent_id_input,
     get_openai_client,
     get_workspace_client,
     list_judge_models,
@@ -20,14 +20,14 @@ from common import (
 
 st.title("🛠️ Improve Genie Agents")
 st.caption(
-    "Loads traces that failed evaluation, reads your Genie Space config, "
+    "Loads traces that failed evaluation, reads your Genie agent config, "
     "and asks an LLM to generate targeted improvement suggestions."
 )
 
 experiment_name, experiment_id = require_experiment()
 st.info(f"Experiment: `{experiment_name}`")
 
-space_id = genie_space_id_input()
+space_id = genie_agent_id_input()
 
 analyzer_model_options = list_judge_models()
 _default_analyzer = os.environ.get("ANALYZER_MODEL", "databricks-claude-sonnet-4-6")
@@ -50,7 +50,7 @@ if not st.button("Generate improvement suggestions", type="primary"):
     st.stop()
 
 if not space_id.strip():
-    st.error("Please enter a Genie Space ID.")
+    st.error("Please enter a Genie Agent ID.")
     st.stop()
 
 w = get_workspace_client()
@@ -58,15 +58,35 @@ client = get_openai_client(w)
 mlflow.set_experiment(experiment_name)
 
 # Step 1: load failed traces
+# Only Genie conversation traces are analyzable. The experiment also holds LLM
+# judge calls (auto-traced by evaluation runs) and this page's own
+# `analyze_genie_space` traces, none of which have a question to fix.
+GENIE_TRACE_FILTER = "tags.`mlflow.traceName` = 'genie_interaction'"
+
 with st.spinner("Loading traces with failures…"):
     all_traces = mlflow.search_traces(
-        locations=[experiment_id], return_type="list"
+        locations=[experiment_id],
+        filter_string=GENIE_TRACE_FILTER,
+        return_type="list",
     )
+
+def _is_failure(assessment) -> bool:
+    """True when an assessment represents a failed check.
+
+    Scorers report failure in two shapes: the Guidelines/built-in judges use the
+    string ``"no"``, while code-based scorers such as ``code_grounded`` return a
+    plain ``False``. Checking only for ``"no"`` would silently drop the latter.
+    """
+    value = assessment.value
+    if isinstance(value, bool):
+        return value is False
+    return str(value).strip().lower() == "no"
+
 
 failed_conversations = []
 for trace in all_traces:
     assessments = trace.info.assessments or []
-    failures = [a for a in assessments if a.value == "no"]
+    failures = [a for a in assessments if _is_failure(a)]
     if not failures:
         continue
 
@@ -95,16 +115,16 @@ st.write(
 )
 
 if not failed_conversations:
-    st.success("No failures found — your Genie Space is performing well on all evaluated traces!")
+    st.success("No failures found — your Genie agent is performing well on all evaluated traces!")
     st.stop()
 
-# Step 2: read Genie Space config
-with st.spinner("Reading Genie Space configuration…"):
+# Step 2: read Genie agent config
+with st.spinner("Reading Genie agent configuration…"):
     try:
         space = w.genie.get_space(space_id=space_id.strip(), include_serialized_space=True)
         config = json.loads(space.serialized_space) if space.serialized_space else {}
     except Exception as exc:
-        st.error(f"Could not read Genie Space config: {exc}")
+        st.error(f"Could not read Genie agent config: {exc}")
         st.stop()
 
 tables = config.get("data_sources", {}).get("tables", [])
@@ -114,14 +134,14 @@ example_sqls = instructions.get("example_question_sqls", [])
 table_names = [t["identifier"] for t in tables]
 
 st.write(
-    f"Space: **{space.title}** — "
+    f"Agent: **{space.title}** — "
     f"{len(tables)} table(s), {len(text_instructions)} instruction(s), "
     f"{len(example_sqls)} example SQL(s)."
 )
 
 # Step 3: build prompts and call LLM
 system_prompt = (
-    "You are an expert Databricks AI/BI Genie space consultant. "
+    "You are an expert Databricks AI/BI Genie agent consultant. "
     "You will be given conversations where Genie gave wrong or incomplete answers, "
     "along with the specific checks that failed. "
     "Generate specific, copy-paste-ready fixes: SQL expressions, text instructions, "
@@ -134,7 +154,7 @@ analysis_prompt = f"""Fix the issues found in these Genie conversations.
 ## FAILED CONVERSATIONS
 {json.dumps(failed_conversations[:max_failed], indent=2)}
 
-## CURRENT SPACE CONFIG
+## CURRENT AGENT CONFIG
 Title: {space.title}
 Tables: {', '.join(table_names[:10])}
 Text instructions: {len(text_instructions)}
@@ -146,7 +166,7 @@ Prioritize by impact."""
 
 
 @mlflow.trace
-def analyze_genie_space(user_prompt: str, sys_prompt: str) -> str:
+def analyze_genie_agent(user_prompt: str, sys_prompt: str) -> str:
     response = client.chat.completions.create(
         model=analyzer_model,
         messages=[
@@ -161,7 +181,7 @@ def analyze_genie_space(user_prompt: str, sys_prompt: str) -> str:
 
 with st.spinner("Asking the LLM to generate improvement suggestions…"):
     try:
-        recommendations = analyze_genie_space(analysis_prompt, system_prompt)
+        recommendations = analyze_genie_agent(analysis_prompt, system_prompt)
     except Exception as exc:
         st.error(f"LLM call failed: {exc}")
         st.stop()

@@ -8,11 +8,12 @@ dependencies = [
     "mlflow[databricks,genai]",
     "databricks-sdk",
     "databricks-openai",
+    "psycopg[binary]>=3.1.0",
 ]
 
 [project.scripts]
 quickstart = "scripts.quickstart:main"
-create-genie-space = "scripts.create_genie_space:main"
+create-genie-agent = "scripts.create_genie_agent:main"
 
 [build-system]
 requires = ["hatchling"]

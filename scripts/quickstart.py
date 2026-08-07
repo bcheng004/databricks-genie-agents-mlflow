@@ -215,7 +215,7 @@ def main() -> None:
         "\nDone. Experiment ready:\n"
         f"  name: {exp_name}\n"
         f"  id:   {exp_id}\n\n"
-        "Next: `uv run create-genie-space` to attach a Genie space, "
+        "Next: `uv run create-genie-agent` to attach a Genie agent, "
         "then deploy with `databricks bundle deploy`."
     )
 

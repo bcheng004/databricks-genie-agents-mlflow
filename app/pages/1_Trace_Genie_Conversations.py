@@ -8,7 +8,7 @@ text response.
 import mlflow
 import streamlit as st
 
-from common import genie_space_id_input, get_workspace_client, require_experiment
+from common import genie_agent_id_input, get_workspace_client, require_experiment
 
 st.title("💬 Trace Genie Conversations")
 st.caption(
@@ -19,7 +19,7 @@ st.caption(
 experiment_name, experiment_id = require_experiment()
 st.info(f"Experiment: `{experiment_name}`")
 
-space_id = genie_space_id_input()
+space_id = genie_agent_id_input()
 
 if not st.button("Trace new conversations", type="primary"):
     st.stop()
