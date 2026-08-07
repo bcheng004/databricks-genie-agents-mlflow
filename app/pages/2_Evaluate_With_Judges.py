@@ -13,9 +13,9 @@ import pandas as pd
 import streamlit as st
 from mlflow.entities import AssessmentError, Feedback
 from mlflow.genai.scorers import (
+    Correctness,
     Guidelines,
     RelevanceToQuery,
-    RetrievalGroundedness,
     Safety,
 )
 
@@ -179,7 +179,7 @@ builtin_judge_model = st.selectbox(
 )
 use_relevance = st.checkbox("RelevanceToQuery", value=True)
 use_safety = st.checkbox("Safety", value=True)
-use_groundedness = st.checkbox("RetrievalGroundedness", value=False)
+use_correctness = st.checkbox("Correctness", value=False)
 
 st.markdown("**Guidelines judges**")
 guideline_judge_model = st.selectbox(
@@ -249,8 +249,8 @@ if use_relevance:
     scorers.append(RelevanceToQuery(**builtin_mkw))
 if use_safety:
     scorers.append(Safety(**builtin_mkw))
-if use_groundedness:
-    scorers.append(RetrievalGroundedness(**builtin_mkw))
+if use_correctness:
+    scorers.append(Correctness(**builtin_mkw))
 
 for name, selected in selected_guidelines.items():
     if selected:
