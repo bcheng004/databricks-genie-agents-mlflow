@@ -28,6 +28,8 @@ with st.sidebar:
         '<div style="text-align:center;padding:8px 0 4px">'
         + _img_tag(os.path.join(_HERE, "static", "databricks-logo.png"), "image/png", 180)
         + "<br/>"
+        + _img_tag(os.path.join(_HERE, "static", "genie-logo.png"), "image/png", 64)
+        + "<br/>"
         + _img_tag(os.path.join(_HERE, "static", "mlflow-logo.svg"), "image/svg+xml", 110)
         + "</div>"
     )

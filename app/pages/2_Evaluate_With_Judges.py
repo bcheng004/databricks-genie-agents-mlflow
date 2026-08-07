@@ -510,8 +510,8 @@ def _assessment_fields(a) -> tuple[str, object, str]:
 def build_score_tables(eval_df: pd.DataFrame) -> pd.DataFrame:
     """Return one row per (trace × scorer) with Question, Scorer, Value, Rationale.
 
-    Reads assessments directly from the trace objects in ``eval_df``, which were
-    freshly loaded from the server after both evaluate() and log_feedback() ran.
+    Only the latest assessment per scorer is kept (highest create_time_ms) so
+    re-running evaluation doesn't show stale results alongside new ones.
     """
     cols = eval_df.columns
     in_col = "inputs" if "inputs" in cols else "request"
@@ -523,8 +523,24 @@ def build_score_tables(eval_df: pd.DataFrame) -> pd.DataFrame:
         trace_id = str(r.get(id_col, ""))
         question = _short(req.get("question"), 100)
 
+        # Keep only the latest assessment per scorer name.
+        latest: dict[str, tuple] = {}  # scorer_name → (create_time_ms, assessment)
         for a in r.get("assessments") or []:
-            name, value, rationale = _assessment_fields(a)
+            name = (
+                a.get("assessment_name") or a.get("name")
+                if isinstance(a, dict)
+                else getattr(a, "name", None) or getattr(a, "assessment_name", None)
+            ) or "?"
+            ts = (
+                a.get("create_time_ms", 0)
+                if isinstance(a, dict)
+                else getattr(a, "create_time_ms", 0) or 0
+            )
+            if name not in latest or ts > latest[name][0]:
+                latest[name] = (ts, a)
+
+        for name, (_, a) in sorted(latest.items()):
+            _, value, rationale = _assessment_fields(a)
             rows.append(
                 {
                     "Question": question,
@@ -558,7 +574,45 @@ except Exception as exc:
 
 if len(results_df):
     st.caption("One row per trace × scorer, with rationale inline.")
-    st.dataframe(results_df, use_container_width=True, hide_index=True)
+    # Render as an HTML table so the Rationale column wraps with a hard cap.
+    _RATIONALE_MAX = 400
+
+    def _to_html(df: pd.DataFrame) -> str:
+        import html
+        cols = list(df.columns)
+        header = "".join(
+            f'<th style="padding:6px 10px;border-bottom:1px solid #ccc;'
+            f'white-space:nowrap;font-weight:600">{html.escape(c)}</th>'
+            for c in cols
+        )
+        rows_html = ""
+        for _, row in df.iterrows():
+            cells = ""
+            for c in cols:
+                raw = "" if row[c] is None else str(row[c])
+                if c == "Rationale":
+                    val = raw[:_RATIONALE_MAX] + ("…" if len(raw) > _RATIONALE_MAX else "")
+                    style = (
+                        "min-width:340px;max-width:480px;"
+                        "word-break:break-word;white-space:pre-wrap"
+                    )
+                else:
+                    val = raw
+                    style = "white-space:nowrap"
+                cells += (
+                    f'<td style="padding:6px 10px;border-bottom:1px solid #eee;'
+                    f'vertical-align:top;{style}">{html.escape(val)}</td>'
+                )
+            rows_html += f"<tr>{cells}</tr>"
+        return (
+            '<div style="overflow-x:auto">'
+            '<table style="width:100%;border-collapse:collapse;font-size:0.85rem">'
+            f"<thead><tr>{header}</tr></thead>"
+            f"<tbody>{rows_html}</tbody>"
+            "</table></div>"
+        )
+
+    st.html(_to_html(results_df))
 else:
     st.info("No per-trace assessments were returned for this run.")
 
