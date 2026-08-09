@@ -11,7 +11,7 @@ Based on the [MLflow Databricks Genie cookbook](https://mlflow.org/cookbook/data
 
 A four-page Streamlit app:
 
-1. **Trace Conversations** — pull a Genie agent's conversations and log each message as an MLflow trace.
+1. **Chat & Trace Genie** — chat with the Genie agent in an embedded view, then log its conversations as MLflow traces (question, generated SQL, executed query result, and text response).
 2. **Create Guideline Judge** — define custom `Guidelines` judges (or quick-add presets) used on the Evaluate page.
 3. **Evaluate With Judges** — pick traces from a table and score them with built-in judges, Guidelines judges, and code-based scorers.
 4. **Improve Genie Agents** — feed failed traces + the agent config to an LLM that proposes copy-paste-ready fixes.
@@ -106,7 +106,7 @@ databricks bundle run genie_mlflow -t dev
 ```
 
 The `run` command prints the app URL. Open it, then work through the sidebar pages:
-Trace Conversations → (optionally Create Guideline Judge) → Evaluate With Judges →
+Chat & Trace Genie → (optionally Create Guideline Judge) → Evaluate With Judges →
 Improve Genie Agents. Re-run tracing and evaluation after applying fixes to measure impact.
 
 > The app authenticates as the logged-in user (on-behalf-of). If you add or change
@@ -121,8 +121,10 @@ Improve Genie Agents. Re-run tracing and evaluation after applying fixes to meas
 | --- | --- | --- |
 | `MLFLOW_EXPERIMENT_NAME` | `quickstart` | Experiment the app reads/writes traces from. |
 | `MLFLOW_TRACING_SQL_WAREHOUSE_ID` | `quickstart` | Warehouse for MLflow trace queries. |
+| `DATABRICKS_WORKSPACE_URL` | `quickstart` | Workspace URL used to build the embedded Genie chat URL. |
+| `DATABRICKS_WORKSPACE_ID` | `quickstart` | Workspace (org) ID used as the `o=` param in the embedded chat URL. |
 | `GENIE_AGENT_ID` | `add-genie-agent` | Default Genie agent (overridable per page). |
-| `ANALYZER_MODEL` | manual | Default model for the Improve page's analyzer. |
+| `ANALYZER_MODEL` | manual | Model for the Improve page's analyzer (default `databricks-claude-sonnet-5`). |
 
 ## Concepts
 
