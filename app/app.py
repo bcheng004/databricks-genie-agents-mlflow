@@ -38,15 +38,10 @@ with st.sidebar:
 st.navigation(
     [
         st.Page(
-            "pages/1_Trace_Genie_Conversations.py",
-            title="Trace Conversations",
+            "pages/1_Chat_And_Trace_Genie.py",
+            title="Chat & Trace Genie",
             icon="💬",
             default=True,
-        ),
-        st.Page(
-            "pages/5_Chat_With_Genie.py",
-            title="Chat With Genie",
-            icon="🗨️",
         ),
         st.Page(
             "pages/4_Create_Guideline_Judge.py",
