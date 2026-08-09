@@ -11,7 +11,7 @@ env:
   - name: MLFLOW_TRACING_SQL_WAREHOUSE_ID
     value: "9bbc027402111984"
   - name: ANALYZER_MODEL
-    value: databricks-claude-sonnet-4-6
+    value: databricks-claude-sonnet-5
   # Lakebase endpoint backing the code_grounded scorer's BM25 code index.
   # PGHOST/PGPORT/PGDATABASE/PGUSER are auto-injected by the platform from the
   # `postgres` app resource; only the endpoint path must be set explicitly.

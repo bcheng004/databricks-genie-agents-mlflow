@@ -13,7 +13,7 @@ variables:
     default: "databricks-claude-sonnet-5"
   analyzer_model:
     description: "Serving endpoint used to generate Genie agent improvement suggestions."
-    default: "databricks-claude-sonnet-4-6"
+    default: "databricks-claude-sonnet-5"
   genie_agent_id:
     description: "Genie agent ID the app traces and analyzes."
     default: "01f194292d3617f3aaf146bc2eb4720a"

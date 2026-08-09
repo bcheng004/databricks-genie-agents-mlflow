@@ -30,7 +30,7 @@ st.info(f"Experiment: `{experiment_name}`")
 space_id = genie_agent_id_input()
 
 analyzer_model_options = list_judge_models()
-_default_analyzer = os.environ.get("ANALYZER_MODEL", "databricks-claude-sonnet-4-6")
+_default_analyzer = os.environ.get("ANALYZER_MODEL", "databricks-claude-sonnet-5")
 analyzer_model = st.selectbox(
     "Analyzer model",
     analyzer_model_options,
