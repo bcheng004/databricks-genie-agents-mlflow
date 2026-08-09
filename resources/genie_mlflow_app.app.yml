@@ -2,12 +2,16 @@ resources:
   apps:
     genie_mlflow:
       name: genie-mlflow-${bundle.target}
-      description: "Streamlit app: configure a UC-managed MLflow experiment, trace Genie conversations, evaluate with LLM judges, and generate improvement suggestions."
+      description: "Streamlit app: configure a UC-managed MLflow experiment, trace Genie agent conversations, evaluate with LLM judges, and generate improvement suggestions."
       source_code_path: ../app
       user_api_scopes:
         - genie
         - sql
         - model-serving
+        - ai-gateway
+        # Lets the app mint Lakebase credentials as the logged-in user, so the
+        # code_grounded scorer reads the code index under the caller's grants.
+        - postgres
       resources:
         - name: sql-warehouse
           description: "Warehouse used for MLflow trace queries and schema creation."
@@ -20,7 +24,13 @@ resources:
             name: ${var.judge_model}
             permission: CAN_QUERY
         - name: analyzer-model
-          description: "Foundation model endpoint used to generate Genie space improvement suggestions."
+          description: "Foundation model endpoint used to generate Genie agent improvement suggestions."
           serving_endpoint:
             name: ${var.analyzer_model}
             permission: CAN_QUERY
+        - name: postgres
+          description: "Lakebase project holding the BM25 code index for the code_grounded scorer."
+          postgres:
+            branch: ${var.lakebase_branch}
+            database: ${var.lakebase_database}
+            permission: CAN_CONNECT_AND_CREATE

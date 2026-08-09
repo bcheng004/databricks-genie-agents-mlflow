@@ -106,6 +106,22 @@ def detect_warehouse_id(w, provided: str | None) -> str:
     return wh.id
 
 
+def resolve_embed_config(w) -> tuple[str, str | None]:
+    """Return (workspace_url, workspace_id) used to build the Genie embed URL.
+
+    The workspace URL comes from the client config; the workspace (org) ID is
+    the `o=` query param in the embed URL. A missing ID is non-fatal — the page
+    can still resolve it at runtime.
+    """
+    workspace_url = (w.config.host or "").rstrip("/")
+    try:
+        workspace_id = str(w.get_workspace_id())
+    except Exception as exc:  # noqa: BLE001 — surface but don't abort
+        print(f"    (warning) could not resolve workspace ID: {exc}")
+        workspace_id = None
+    return workspace_url, workspace_id
+
+
 def create_uc_schema(w, warehouse_id: str, catalog: str, schema: str) -> None:
     print(f"  Ensuring UC schema {catalog}.{schema} …")
     try:
@@ -187,6 +203,11 @@ def main() -> None:
     os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = warehouse_id
     create_uc_schema(w, warehouse_id, args.catalog, args.schema)
 
+    workspace_url, workspace_id = resolve_embed_config(w)
+    print(f"  Workspace URL: {workspace_url}")
+    if workspace_id:
+        print(f"  Workspace ID:  {workspace_id}")
+
     print("[3/4] Creating / reusing UC-managed MLflow experiment …")
     exp_name, exp_id = create_experiment(args)
 
@@ -199,23 +220,28 @@ def main() -> None:
         "UC_SCHEMA": args.schema,
         "UC_TABLE_PREFIX": args.table_prefix,
         "MLFLOW_TRACING_SQL_WAREHOUSE_ID": warehouse_id,
+        "DATABRICKS_WORKSPACE_URL": workspace_url,
     }
+    if workspace_id:
+        env_updates["DATABRICKS_WORKSPACE_ID"] = workspace_id
     for key, value in env_updates.items():
         update_env_file(key, value)
 
-    set_app_yaml_env(
-        {
-            "MLFLOW_EXPERIMENT_NAME": exp_name,
-            "MLFLOW_TRACING_SQL_WAREHOUSE_ID": warehouse_id,
-        }
-    )
+    app_yaml_env = {
+        "MLFLOW_EXPERIMENT_NAME": exp_name,
+        "MLFLOW_TRACING_SQL_WAREHOUSE_ID": warehouse_id,
+        "DATABRICKS_WORKSPACE_URL": workspace_url,
+    }
+    if workspace_id:
+        app_yaml_env["DATABRICKS_WORKSPACE_ID"] = workspace_id
+    set_app_yaml_env(app_yaml_env)
     set_bundle_variable_default("warehouse_id", warehouse_id)
 
     print(
         "\nDone. Experiment ready:\n"
         f"  name: {exp_name}\n"
         f"  id:   {exp_id}\n\n"
-        "Next: `uv run create-genie-space` to attach a Genie space, "
+        "Next: `uv run add-genie-agent` to attach a Genie agent, "
         "then deploy with `databricks bundle deploy`."
     )
 

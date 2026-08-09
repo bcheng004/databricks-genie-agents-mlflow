@@ -1,6 +1,6 @@
 # Databricks Genie Agents
 
-Evaluate and improve [Databricks Genie](https://docs.databricks.com/genie/) spaces
+Evaluate and improve [Databricks Genie](https://docs.databricks.com/genie/) agents
 (text-to-SQL assistants) using MLflow. Genie conversations become MLflow traces you
 can inspect, score with LLM judges, and turn into concrete configuration fixes — all
 from a Streamlit app deployed as a [Databricks App](https://docs.databricks.com/dev-tools/databricks-apps/).
@@ -11,18 +11,18 @@ Based on the [MLflow Databricks Genie cookbook](https://mlflow.org/cookbook/data
 
 A four-page Streamlit app:
 
-1. **Trace Conversations** — pull a Genie space's conversations and log each message as an MLflow trace.
+1. **Chat & Trace Genie** — chat with the Genie agent in an embedded view, then log its conversations as MLflow traces (question, generated SQL, executed query result, and text response).
 2. **Create Guideline Judge** — define custom `Guidelines` judges (or quick-add presets) used on the Evaluate page.
 3. **Evaluate With Judges** — pick traces from a table and score them with built-in judges, Guidelines judges, and code-based scorers.
-4. **Improve Genie Agents** — feed failed traces + the space config to an LLM that proposes copy-paste-ready fixes.
+4. **Improve Genie Agents** — feed failed traces + the agent config to an LLM that proposes copy-paste-ready fixes.
 
-The app reads its configuration (experiment, warehouse, Genie space) from environment
+The app reads its configuration (experiment, warehouse, Genie agent) from environment
 variables in `app/app.yaml`. The `uv run quickstart` command provisions the UC-managed
 MLflow experiment and writes those values for you.
 
 ## Prerequisites
 
-- A Databricks workspace with an existing Genie space that has conversations
+- A Databricks workspace with an existing Genie agent that has conversations
 - The [Databricks CLI](https://docs.databricks.com/dev-tools/cli/) (`databricks`) authenticated to that workspace
 - [`uv`](https://docs.astral.sh/uv/) installed
 
@@ -72,7 +72,7 @@ to recreate it.
 ### 2. Attach a Genie Agent
 
 ```bash
-uv run create-genie-space
+uv run add-genie-agent
 ```
 
 **Terminal inputs:**
@@ -80,23 +80,23 @@ uv run create-genie-space
 | Prompt | What to enter |
 | --- | --- |
 | **Select a profile** | Same profile picker as the quickstart. |
-| **Attach vs. create** | `1` to attach an existing space by ID, or `2` to reuse/create one by title. |
-| **Genie space ID** | (option 1) The space ID from the Genie space URL, e.g. `01f0123456789abc`. |
-| **Space title** | (option 2) Reuses a space with that title if found, otherwise creates a new one. |
-| **Warehouse ID / tables / description** | (only when creating a new space) SQL warehouse, one fully-qualified `catalog.schema.table` per line (blank to finish), and an optional description. |
+| **Attach vs. create** | `1` to attach an existing agent by ID, or `2` to reuse/create one by title. |
+| **Genie agent ID** | (option 1) The agent ID from the Genie agent URL, e.g. `01f0123456789abc`. |
+| **Agent title** | (option 2) Reuses an agent with that title if found, otherwise creates a new one. |
+| **Warehouse ID / tables / description** | (only when creating a new agent) SQL warehouse, one fully-qualified `catalog.schema.table` per line (blank to finish), and an optional description. |
 
 Or skip the prompts with flags:
 
 ```bash
-# Attach an existing space you already have
-uv run create-genie-space --space-id 01f0123456789abc
+# Attach an existing agent you already have
+uv run add-genie-agent --agent-id 01f0123456789abc
 
 # Reuse by title, or create it from tables if not found
-uv run create-genie-space --title "Sales Genie" --warehouse-id abc123 \
+uv run add-genie-agent --title "Sales Genie" --warehouse-id abc123 \
   --table main.sales.orders --table main.sales.customers
 ```
 
-This writes `GENIE_SPACE_ID` into `.env`, `app/app.yaml`, and the bundle variables.
+This writes `GENIE_AGENT_ID` into `.env`, `app/app.yaml`, and the bundle variables.
 
 ### 3. Deploy the app
 
@@ -106,7 +106,7 @@ databricks bundle run genie_mlflow -t dev
 ```
 
 The `run` command prints the app URL. Open it, then work through the sidebar pages:
-Trace Conversations → (optionally Create Guideline Judge) → Evaluate With Judges →
+Chat & Trace Genie → (optionally Create Guideline Judge) → Evaluate With Judges →
 Improve Genie Agents. Re-run tracing and evaluation after applying fixes to measure impact.
 
 > The app authenticates as the logged-in user (on-behalf-of). If you add or change
@@ -121,12 +121,14 @@ Improve Genie Agents. Re-run tracing and evaluation after applying fixes to meas
 | --- | --- | --- |
 | `MLFLOW_EXPERIMENT_NAME` | `quickstart` | Experiment the app reads/writes traces from. |
 | `MLFLOW_TRACING_SQL_WAREHOUSE_ID` | `quickstart` | Warehouse for MLflow trace queries. |
-| `GENIE_SPACE_ID` | `create-genie-space` | Default Genie space (overridable per page). |
-| `ANALYZER_MODEL` | manual | Default model for the Improve page's analyzer. |
+| `DATABRICKS_WORKSPACE_URL` | `quickstart` | Workspace URL used to build the embedded Genie chat URL. |
+| `DATABRICKS_WORKSPACE_ID` | `quickstart` | Workspace (org) ID used as the `o=` param in the embedded chat URL. |
+| `GENIE_AGENT_ID` | `add-genie-agent` | Default Genie agent (overridable per page). |
+| `ANALYZER_MODEL` | manual | Model for the Improve page's analyzer (default `databricks-claude-sonnet-5`). |
 
 ## Concepts
 
-- **Genie space** — wraps Unity Catalog tables, instructions, SQL expressions, and
+- **Genie agent** — wraps Unity Catalog tables, instructions, SQL expressions, and
   benchmarks to guide natural-language-to-SQL translation.
 - **Trace** — one Genie interaction (question → SQL → answer) captured for inspection.
 - **Scorer / judge** — built-in, custom `Guidelines`, or code-based check that grades a trace.
@@ -136,4 +138,4 @@ Improve Genie Agents. Re-run tracing and evaluation after applying fixes to meas
 - [Cookbook: Genie + MLflow](https://mlflow.org/cookbook/databricks-genie/)
 - [Conversation tracing pipeline](https://mlflow.org/cookbook/genie-tracing-pipeline/)
 - [Evaluation with LLM judges](https://mlflow.org/cookbook/genie-evaluation-judges/)
-- [Space improvement generator](https://mlflow.org/cookbook/genie-space-analyzer/)
+- [Agent improvement generator](https://mlflow.org/cookbook/genie-space-analyzer/)

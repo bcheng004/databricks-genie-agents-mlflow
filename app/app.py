@@ -7,13 +7,39 @@ conversations, evaluate them with LLM judges, and generate improvement
 suggestions.
 """
 
+import base64
+import os
+
 import streamlit as st
+
+_HERE = os.path.dirname(__file__)
+
+
+def _img_tag(path: str, mime: str, width: int) -> str:
+    data = base64.b64encode(open(path, "rb").read()).decode()
+    return (
+        f'<img src="data:{mime};base64,{data}" '
+        f'width="{width}" style="display:block;margin:0 auto;" />'
+    )
+
+
+with st.sidebar:
+    st.html(
+        '<div style="text-align:center;padding:8px 0 4px">'
+        + _img_tag(os.path.join(_HERE, "static", "databricks-logo.png"), "image/png", 180)
+        + "<br/>"
+        + _img_tag(os.path.join(_HERE, "static", "genie-logo.png"), "image/png", 64)
+        + "<br/>"
+        + _img_tag(os.path.join(_HERE, "static", "mlflow-logo.svg"), "image/svg+xml", 110)
+        + "</div>"
+    )
+    st.divider()
 
 st.navigation(
     [
         st.Page(
-            "pages/1_Trace_Genie_Conversations.py",
-            title="Trace Conversations",
+            "pages/1_Chat_And_Trace_Genie.py",
+            title="Chat & Trace Genie",
             icon="💬",
             default=True,
         ),
