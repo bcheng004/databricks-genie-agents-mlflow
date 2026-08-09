@@ -16,7 +16,7 @@ variables:
     default: "databricks-claude-sonnet-4-6"
   genie_agent_id:
     description: "Genie agent ID the app traces and analyzes."
-    default: "01f17bd5fc55147394d6b0cd2152860c"
+    default: "01f194292d3617f3aaf146bc2eb4720a"
   lakebase_branch:
     description: "Lakebase branch holding the BM25 code index used by the code_grounded
       scorer."

@@ -44,6 +44,11 @@ st.navigation(
             default=True,
         ),
         st.Page(
+            "pages/5_Chat_With_Genie.py",
+            title="Chat With Genie",
+            icon="🗨️",
+        ),
+        st.Page(
             "pages/4_Create_Guideline_Judge.py",
             title="Create Guideline Judge",
             icon="🧭",

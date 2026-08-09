@@ -6,15 +6,15 @@ app), and the databricks.yml `genie_agent_id` bundle variable default.
 Run with no flags to be prompted for the profile and the agent (attach an
 existing one by ID, or reuse/create one by title):
 
-    uv run create-genie-agent
+    uv run add-genie-agent
 
 Or pass flags to skip the prompts (useful for CI):
 
     # Wire up an agent you already have:
-    uv run create-genie-agent --agent-id 01f0123456789abc
+    uv run add-genie-agent --agent-id 01f0123456789abc
 
     # Reuse by title, or create if not found:
-    uv run create-genie-agent --title "Sales Genie" --warehouse-id abc123 \
+    uv run add-genie-agent --title "Sales Genie" --warehouse-id abc123 \
         --table main.sales.orders --table main.sales.customers
 """
 

@@ -13,7 +13,6 @@ import pandas as pd
 import streamlit as st
 from mlflow.entities import AssessmentError, Feedback
 from mlflow.genai.scorers import (
-    Correctness,
     Guidelines,
     RelevanceToQuery,
     Safety,
@@ -33,6 +32,10 @@ from common import (
     list_judge_models,
     require_experiment,
 )
+
+# Preferred default endpoint for the code_grounded judge (falls back to the
+# first available model when this endpoint isn't listed).
+DEFAULT_CODE_GROUNDED_MODEL = "databricks-gpt-5-6-luna"
 
 st.title("⚖️ Evaluate Genie Agents")
 st.caption(
@@ -179,7 +182,6 @@ builtin_judge_model = st.selectbox(
 )
 use_relevance = st.checkbox("RelevanceToQuery", value=True)
 use_safety = st.checkbox("Safety", value=True)
-use_correctness = st.checkbox("Correctness", value=False)
 
 st.markdown("**Guidelines judges**")
 guideline_judge_model = st.selectbox(
@@ -209,9 +211,16 @@ use_code_grounded = st.checkbox(
     ),
 )
 if use_code_grounded:
+    code_grounded_options = list_judge_models()
+    code_grounded_default_index = (
+        code_grounded_options.index(DEFAULT_CODE_GROUNDED_MODEL)
+        if DEFAULT_CODE_GROUNDED_MODEL in code_grounded_options
+        else 0
+    )
     code_grounded_model = st.selectbox(
         "Model for code_grounded judge",
-        list_judge_models(),
+        code_grounded_options,
+        index=code_grounded_default_index,
         key="code_grounded_model",
         help="Foundation Model endpoint used to judge groundedness against the retrieved code.",
     )
@@ -249,8 +258,6 @@ if use_relevance:
     scorers.append(RelevanceToQuery(**builtin_mkw))
 if use_safety:
     scorers.append(Safety(**builtin_mkw))
-if use_correctness:
-    scorers.append(Correctness(**builtin_mkw))
 
 for name, selected in selected_guidelines.items():
     if selected:

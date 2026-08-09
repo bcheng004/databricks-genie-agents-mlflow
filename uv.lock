@@ -1114,7 +1114,9 @@ dependencies = [
 
 [package.dev-dependencies]
 setup = [
+    { name = "databricks-agents" },
     { name = "ruamel-yaml" },
+    { name = "unitycatalog-ai", extra = ["databricks"] },
 ]
 
 [package.metadata]
@@ -1127,7 +1129,11 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-setup = [{ name = "ruamel-yaml", specifier = ">=0.18.0" }]
+setup = [
+    { name = "databricks-agents", specifier = ">=1.1.0" },
+    { name = "ruamel-yaml", specifier = ">=0.18.0" },
+    { name = "unitycatalog-ai", extras = ["databricks"] },
+]
 
 [[package]]
 name = "gitdb"

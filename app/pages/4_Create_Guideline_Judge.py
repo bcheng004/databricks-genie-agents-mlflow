@@ -1,6 +1,6 @@
 """Page 4 — Create Guideline Judge.
 
-Define custom MLflow Guidelines judges (or quick-add the notebook-02 presets).
+Define custom MLflow Guidelines judges (or quick-add a preset).
 Judges are stored in st.session_state and shared with the Evaluate page's
 Guidelines section for this session.
 """
@@ -12,7 +12,7 @@ from guideline_presets import GUIDELINE_JUDGES
 
 st.title("🧭 Create Guideline Judge")
 st.caption(
-    "Define a custom MLflow Guidelines judge, or quick-add one of the notebook-02 "
+    "Define a custom MLflow Guidelines judge, or quick-add one of the "
     "presets. Judges here appear in the **Guidelines judges** section on the "
     "Evaluate page for this session."
 )
@@ -22,7 +22,7 @@ judges = get_guideline_judges()
 # ---------------------------------------------------------------------------
 # Quick add from presets
 # ---------------------------------------------------------------------------
-st.subheader("Quick add from notebook 02 presets")
+st.subheader("Quick add from presets")
 available_presets = [n for n in GUIDELINE_JUDGES if n not in judges]
 if available_presets:
     preset_name = st.selectbox("Preset", available_presets)
@@ -32,7 +32,7 @@ if available_presets:
         judges[preset_name] = list(GUIDELINE_JUDGES[preset_name])
         st.rerun()
 else:
-    st.caption("All notebook 02 presets have already been added.")
+    st.caption("All presets have already been added.")
 
 # ---------------------------------------------------------------------------
 # Create a custom judge

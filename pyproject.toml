@@ -13,7 +13,10 @@ dependencies = [
 
 [project.scripts]
 quickstart = "scripts.quickstart:main"
-create-genie-agent = "scripts.create_genie_agent:main"
+add-genie-agent = "scripts.add_genie_agent:main"
+deploy-web-search-agent = "scripts.deploy_web_search_agent:main"
+create-web-search-tool = "scripts.create_web_search_tool:main"
+query-web-search-agent = "scripts.query_web_search_agent:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -26,6 +29,10 @@ packages = ["scripts"]
 # Extra deps only the setup CLIs need (not the deployed app runtime).
 setup = [
     "ruamel.yaml>=0.18.0",
+    # Registers the web_search custom tool as a Unity Catalog function.
+    "unitycatalog-ai[databricks]",
+    # Deploys the web-search ResponsesAgent to a Model Serving endpoint.
+    "databricks-agents>=1.1.0",
 ]
 
 [tool.uv]

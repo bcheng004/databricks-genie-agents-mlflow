@@ -8,6 +8,7 @@ resources:
         - genie
         - sql
         - model-serving
+        - ai-gateway
         # Lets the app mint Lakebase credentials as the logged-in user, so the
         # code_grounded scorer reads the code index under the caller's grants.
         - postgres

@@ -72,7 +72,7 @@ to recreate it.
 ### 2. Attach a Genie Agent
 
 ```bash
-uv run create-genie-agent
+uv run add-genie-agent
 ```
 
 **Terminal inputs:**
@@ -89,10 +89,10 @@ Or skip the prompts with flags:
 
 ```bash
 # Attach an existing agent you already have
-uv run create-genie-agent --agent-id 01f0123456789abc
+uv run add-genie-agent --agent-id 01f0123456789abc
 
 # Reuse by title, or create it from tables if not found
-uv run create-genie-agent --title "Sales Genie" --warehouse-id abc123 \
+uv run add-genie-agent --title "Sales Genie" --warehouse-id abc123 \
   --table main.sales.orders --table main.sales.customers
 ```
 
@@ -121,7 +121,7 @@ Improve Genie Agents. Re-run tracing and evaluation after applying fixes to meas
 | --- | --- | --- |
 | `MLFLOW_EXPERIMENT_NAME` | `quickstart` | Experiment the app reads/writes traces from. |
 | `MLFLOW_TRACING_SQL_WAREHOUSE_ID` | `quickstart` | Warehouse for MLflow trace queries. |
-| `GENIE_AGENT_ID` | `create-genie-agent` | Default Genie agent (overridable per page). |
+| `GENIE_AGENT_ID` | `add-genie-agent` | Default Genie agent (overridable per page). |
 | `ANALYZER_MODEL` | manual | Default model for the Improve page's analyzer. |
 
 ## Concepts

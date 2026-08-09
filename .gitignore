@@ -25,3 +25,4 @@ client/src/fastapi_client/
 .isaac
 mlflow.db
 .ruff_cache
+mlruns

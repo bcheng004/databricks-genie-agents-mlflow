@@ -21,6 +21,7 @@ _SP_OAUTH_KEYS = (
 )
 
 FALLBACK_JUDGE_MODELS = [
+    "databricks-gpt-5-6-luna",
     "databricks-claude-sonnet-5",
     "databricks-claude-sonnet-4-6",
     "databricks-qwen35-122b-a10b",
