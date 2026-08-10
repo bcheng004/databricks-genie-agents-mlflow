@@ -1,7 +1,3 @@
-
-
-
-
 # Databricks Genie Agents
 
 Evaluate and improve [Databricks Genie](https://docs.databricks.com/genie/) agents
@@ -13,9 +9,11 @@ Based on the [MLflow Databricks Genie cookbook](https://mlflow.org/cookbook/data
 
 ## Demo
 
-<video src="docs/demo.mp4" controls width="100%"></video>
 
-▶ [Watch the demo](docs/demo.mp4) — a walkthrough of tracing, evaluating, and improving a Genie agent.
+
+https://github.com/user-attachments/assets/2ac2f369-d620-414d-9999-3294d2977c44
+
+
 
 ## What you get
 
