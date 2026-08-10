@@ -5,10 +5,19 @@ command:
 
 env:
   - name: MLFLOW_EXPERIMENT_NAME
-    value: "/Workspace/Shared/bo-eval-genie-agent"
-  - name: GENIE_SPACE_ID
-    value: "01f17bd5fc55147394d6b0cd2152860c"
+    value: "/Workspace/Shared/asana-genie-eval-w"
+  - name: GENIE_AGENT_ID
+    value: "01f194292d3617f3aaf146bc2eb4720a"
   - name: MLFLOW_TRACING_SQL_WAREHOUSE_ID
     value: "9bbc027402111984"
   - name: ANALYZER_MODEL
-    value: databricks-claude-sonnet-4-6
+    value: databricks-claude-sonnet-5
+  # Lakebase endpoint backing the code_grounded scorer's BM25 code index.
+  # PGHOST/PGPORT/PGDATABASE/PGUSER are auto-injected by the platform from the
+  # `postgres` app resource; only the endpoint path must be set explicitly.
+  - name: LAKEBASE_ENDPOINT
+    valueFrom: postgres
+  - name: DATABRICKS_WORKSPACE_URL
+    value: "https://fevm-workshop-guy.cloud.databricks.com"
+  - name: DATABRICKS_WORKSPACE_ID
+    value: "7474659392412718"

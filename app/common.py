@@ -21,6 +21,7 @@ _SP_OAUTH_KEYS = (
 )
 
 FALLBACK_JUDGE_MODELS = [
+    "databricks-gpt-5-6-luna",
     "databricks-claude-sonnet-5",
     "databricks-claude-sonnet-4-6",
     "databricks-qwen35-122b-a10b",
@@ -157,13 +158,13 @@ def require_experiment() -> tuple[str, str]:
     return name, experiment.experiment_id
 
 
-def genie_space_id_input() -> str:
-    """Render a Genie Space ID text input pre-filled from the GENIE_SPACE_ID env var."""
+def genie_agent_id_input() -> str:
+    """Render a Genie Agent ID text input pre-filled from the GENIE_AGENT_ID env var."""
     return st.text_input(
-        "Genie Space ID",
-        value=os.environ.get("GENIE_SPACE_ID", ""),
+        "Genie Agent ID",
+        value=os.environ.get("GENIE_AGENT_ID", "") or os.environ.get("GENIE_SPACE_ID", ""),  # GENIE_SPACE_ID for back-compat
         placeholder="e.g. 01f0123456789abc",
-        help="The Genie space ID (visible in the Genie space URL).",
+        help="The Genie agent ID (visible in the Genie agent URL).",
     )
 
 
