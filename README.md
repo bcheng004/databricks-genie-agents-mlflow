@@ -7,6 +7,12 @@ from a Streamlit app deployed as a [Databricks App](https://docs.databricks.com/
 
 Based on the [MLflow Databricks Genie cookbook](https://mlflow.org/cookbook/databricks-genie/).
 
+## Demo
+
+<video src="docs/demo.mp4" controls width="100%"></video>
+
+▶ [Watch the demo](docs/demo.mp4) — a walkthrough of tracing, evaluating, and improving a Genie agent.
+
 ## What you get
 
 A four-page Streamlit app:
