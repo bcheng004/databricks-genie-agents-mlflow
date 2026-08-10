@@ -7,6 +7,7 @@ judges, Guidelines judges, and code-based scorers.
 
 import json
 import re
+from datetime import datetime
 
 import mlflow
 import pandas as pd
@@ -98,6 +99,44 @@ def build_display(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+# Outputs keys the built-in / Guidelines judges actually read. The trace page
+# also logs `generated_sql` and a `query_result` table, which the judges ignore
+# but which can overflow the judge model's context window.
+_JUDGE_OUTPUT_KEYS = ("response", "error")
+
+
+def _trim_for_judges(subset: pd.DataFrame) -> pd.DataFrame:
+    """Return a copy of ``subset`` with materialized, trimmed ``inputs``/``outputs``
+    columns so the built-in and Guidelines judges never see the SQL or the (large)
+    query-result table.
+
+    ``search_traces()`` returns ``request``/``response``/``trace`` columns but no
+    ``outputs`` column. ``mlflow.genai.evaluate()`` only re-derives ``inputs`` and
+    ``outputs`` from the full ``trace`` object *when those columns are absent*, and
+    the built-in scorers prefer a provided ``outputs`` value over the trace. So we
+    add explicit ``inputs`` and (trimmed) ``outputs`` columns. The ``trace`` column
+    is kept so assessments still land on the original traces.
+
+    This is applied only to the data passed to ``evaluate()`` — the code_grounded
+    scorer runs separately on the untrimmed ``subset`` and keeps the full outputs.
+    """
+    trimmed = subset.copy()
+
+    in_src = next((c for c in ("inputs", "request") if c in trimmed.columns), None)
+    out_src = next((c for c in ("outputs", "response") if c in trimmed.columns), None)
+
+    if in_src is not None:
+        trimmed["inputs"] = trimmed[in_src].map(_parse)
+
+    if out_src is not None:
+        def _strip(val):
+            d = _parse(val)
+            return {k: d[k] for k in _JUDGE_OUTPUT_KEYS if k in d} if d else d
+        trimmed["outputs"] = trimmed[out_src].map(_strip)
+
+    return trimmed
+
+
 # ---------------------------------------------------------------------------
 # Step 1 — Load traces
 # ---------------------------------------------------------------------------
@@ -180,7 +219,7 @@ builtin_judge_model = st.selectbox(
     judge_model_options,
     key="builtin_judge_model",
 )
-use_relevance = st.checkbox("RelevanceToQuery", value=True)
+use_relevance = st.checkbox("RelevanceToQuery", value=False)
 use_safety = st.checkbox("Safety", value=True)
 
 st.markdown("**Guidelines judges**")
@@ -192,7 +231,7 @@ guideline_judge_model = st.selectbox(
 guideline_judges = get_guideline_judges()
 if guideline_judges:
     selected_guidelines = {
-        name: st.checkbox(name, value=True, key=f"guideline_{name}")
+        name: st.checkbox(name, value=False, key=f"guideline_{name}")
         for name in guideline_judges
     }
 else:
@@ -204,7 +243,7 @@ else:
 st.subheader("Code-based scorers")
 use_code_grounded = st.checkbox(
     "code_grounded",
-    value=False,
+    value=True,
     help=(
         "Retrieves code from the Lakebase BM25 code index for each question, then "
         "asks an LLM whether the response is grounded in that code."
@@ -277,11 +316,13 @@ for name, selected in selected_guidelines.items():
 _CODE_JUDGE_PROMPT = (
     "You are an evaluation judge assessing whether an answer is grounded in "
     "reference code snippets.\n\n"
-    "Answer 'yes' only if the substantive technical claims in the answer (APIs, "
-    "imports, function and class names, usage patterns) are supported by the "
-    "snippets.\n"
-    "Answer 'no' if the answer invents APIs or patterns that do not appear in "
-    "the snippets, or contradicts them.\n\n"
+    "Answer 'yes' if the answer is mostly grounded in the snippets — i.e. the "
+    "bulk of its substantive technical claims (APIs, imports, function and class "
+    "names, usage patterns) are supported. A few API or symbol names that do not "
+    "appear in the snippets are acceptable and should NOT by themselves force a "
+    "'no', as long as the core of the answer is supported.\n"
+    "Answer 'no' only if the answer is largely ungrounded — most of its claims "
+    "invent APIs or patterns absent from the snippets, or it contradicts them.\n\n"
     "Respond in exactly this format:\n"
     "VERDICT: yes|no\n"
     "RATIONALE: one or two sentences naming the specific APIs or patterns that "
@@ -353,6 +394,14 @@ def _run_code_grounded(inputs, outputs) -> Feedback:
 
     snippets = format_rows(rows)
 
+    # Grade the answer Genie actually produced: its text response, the SQL it
+    # ran, and the returned rows. Drop `error` (not part of the answer content).
+    answer = {
+        "response": outputs.get("response"),
+        "generated_sql": outputs.get("generated_sql"),
+        "query_result": outputs.get("query_result"),
+    }
+
     try:
         response = code_judge_client.chat.completions.create(
             model=code_judge_model,
@@ -362,7 +411,7 @@ def _run_code_grounded(inputs, outputs) -> Feedback:
                     "role": "user",
                     "content": (
                         f"Question: {question}\n\n"
-                        f"Answer: {outputs}\n\n"
+                        f"Answer: {answer}\n\n"
                         f"Reference code snippets:\n{snippets}"
                     ),
                 },
@@ -447,7 +496,9 @@ eval_run_id = None
 if run_evaluate:
     with st.spinner("Running evaluation (this may take a few minutes)…"):
         try:
-            result = mlflow.genai.evaluate(data=subset, scorers=scorers)
+            result = mlflow.genai.evaluate(
+                data=_trim_for_judges(subset), scorers=scorers
+            )
             eval_run_id = result.run_id
         except Exception as exc:
             st.error(f"Evaluation failed: {exc}")
@@ -514,10 +565,37 @@ def _assessment_fields(a) -> tuple[str, object, str]:
     return str(name), value, ("" if rationale is None else str(rationale))
 
 
+def _assessment_time(a) -> float:
+    """Return a sortable creation time for an assessment, or 0.0 if unavailable.
+
+    The two shapes MLflow returns disagree on the field: ``search_traces``
+    DataFrame rows are dicts carrying ``create_time`` as an ISO-8601 string (no
+    ``create_time_ms``), while list-form objects expose ``create_time_ms`` as
+    epoch milliseconds (no ``create_time``). Handle both so "latest wins" dedup
+    actually works on the DataFrame path.
+    """
+    if isinstance(a, dict):
+        ms = a.get("create_time_ms")
+        if ms is not None:
+            return float(ms)
+        iso = a.get("create_time")
+    else:
+        ms = getattr(a, "create_time_ms", None)
+        if ms is not None:
+            return float(ms)
+        iso = getattr(a, "create_time", None)
+    if iso:
+        try:
+            return datetime.fromisoformat(str(iso).replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return 0.0
+    return 0.0
+
+
 def build_score_tables(eval_df: pd.DataFrame) -> pd.DataFrame:
     """Return one row per (trace × scorer) with Question, Scorer, Value, Rationale.
 
-    Only the latest assessment per scorer is kept (highest create_time_ms) so
+    Only the latest assessment per scorer is kept (latest creation time) so
     re-running evaluation doesn't show stale results alongside new ones.
     """
     cols = eval_df.columns
@@ -538,11 +616,7 @@ def build_score_tables(eval_df: pd.DataFrame) -> pd.DataFrame:
                 if isinstance(a, dict)
                 else getattr(a, "name", None) or getattr(a, "assessment_name", None)
             ) or "?"
-            ts = (
-                a.get("create_time_ms", 0)
-                if isinstance(a, dict)
-                else getattr(a, "create_time_ms", 0) or 0
-            )
+            ts = _assessment_time(a)
             if name not in latest or ts > latest[name][0]:
                 latest[name] = (ts, a)
 

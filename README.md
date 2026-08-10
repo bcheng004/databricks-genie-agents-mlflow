@@ -7,6 +7,14 @@ from a Streamlit app deployed as a [Databricks App](https://docs.databricks.com/
 
 Based on the [MLflow Databricks Genie cookbook](https://mlflow.org/cookbook/databricks-genie/).
 
+## Demo
+
+
+
+https://github.com/user-attachments/assets/2ac2f369-d620-414d-9999-3294d2977c44
+
+
+
 ## What you get
 
 A four-page Streamlit app:

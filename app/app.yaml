@@ -5,9 +5,9 @@ command:
 
 env:
   - name: MLFLOW_EXPERIMENT_NAME
-    value: "/Workspace/Shared/asana-genie-eval-w"
+    value: "/Workspace/Shared/genie-eval-workshop"
   - name: GENIE_AGENT_ID
-    value: "01f194292d3617f3aaf146bc2eb4720a"
+    value: "01f19467a6d219cfa3a223c678173c59"
   - name: MLFLOW_TRACING_SQL_WAREHOUSE_ID
     value: "9bbc027402111984"
   - name: ANALYZER_MODEL
