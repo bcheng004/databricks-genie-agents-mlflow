@@ -186,7 +186,12 @@ def run_trace(space_id: str, experiment_name: str, experiment_id: str) -> None:
                         "error": str(msg.error) if msg.error else None,
                     }
                 )
-                mlflow.update_current_trace(tags={"message_id": msg.message_id})
+                mlflow.update_current_trace(
+                    tags={
+                        "message_id": msg.message_id,
+                        "genie_agent_id": space_id,
+                    }
+                )
 
             traced += 1
 
