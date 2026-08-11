@@ -20,7 +20,8 @@ client/src/fastapi_client/
 # Databricks CLI local sync state
 .databricks/
 
-# uv / bun lock noise is intentionally NOT ignored (uv.lock, bun.lock are committed)
+# uv lock file is not committed
+uv.lock
 .omc
 .isaac
 mlflow.db
