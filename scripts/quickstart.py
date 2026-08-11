@@ -3,7 +3,9 @@
 This is the CLI port of what used to be the app's Home/Setup page. It:
 
   1. Validates (or interactively creates) a Databricks CLI profile.
-  2. Detects a SQL warehouse and creates the UC schema for trace storage.
+  2. Resolves a serverless SQL warehouse (prompted, defaulting to the one
+     already configured or a detected serverless warehouse) and creates the UC
+     schema for trace storage.
   3. Creates (or reuses) a Unity Catalog–managed MLflow experiment whose trace
      location points at that catalog/schema/table-prefix.
   4. Writes the resolved config into .env, app/app.yaml (what the deployed app
@@ -12,7 +14,9 @@ This is the CLI port of what used to be the app's Home/Setup page. It:
 Reruns are idempotent — an experiment recorded in .env is reused as-is.
 
 Run with no flags to be prompted for the profile, experiment path, catalog,
-schema, and table prefix (each prompt defaults to the cached .env value):
+schema, table prefix, and serverless SQL warehouse ID (each prompt defaults to
+the cached .env value, and the warehouse falls back to a detected serverless
+warehouse):
 
     uv run quickstart
 
@@ -73,8 +77,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--warehouse-id",
-        default=get_env_value("MLFLOW_TRACING_SQL_WAREHOUSE_ID"),
-        help="SQL warehouse ID. Auto-detected from the workspace if omitted.",
+        default=None,
+        help="Serverless SQL warehouse ID. Prompted for interactively if "
+        "omitted (defaulting to the cached value or a detected serverless "
+        "warehouse).",
     )
     parser.add_argument(
         "--force",
@@ -84,26 +90,46 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def detect_warehouse_id(w, provided: str | None) -> str:
-    """Return the provided warehouse, else a Serverless Starter, else the first."""
-    if provided:
-        return provided
-    warehouses = list(w.warehouses.list())
-    if not warehouses:
-        sys.exit(
-            "No SQL warehouse found. Create one (or pass --warehouse-id) and rerun."
-        )
+def detect_serverless_warehouse_id(w) -> str | None:
+    """Return a serverless SQL warehouse ID to offer as the prompt default.
+
+    Prefers a "Serverless Starter Warehouse", then any serverless-enabled
+    warehouse. Returns None (best effort) if none is found — the prompt then
+    simply has no default and requires an explicit ID.
+    """
+    try:
+        warehouses = list(w.warehouses.list())
+    except Exception as exc:  # noqa: BLE001 — best effort; prompt still works
+        print(f"    (warning) could not list SQL warehouses: {exc}")
+        return None
+    serverless = [x for x in warehouses if x.enable_serverless_compute]
     wh = next(
-        (
-            x
-            for x in warehouses
-            if "Serverless Starter Warehouse" in (x.name or "")
-            and x.enable_serverless_compute
-        ),
-        warehouses[0],
+        (x for x in serverless if "Serverless Starter Warehouse" in (x.name or "")),
+        serverless[0] if serverless else None,
     )
-    print(f"  Using SQL warehouse: {wh.name} ({wh.id})")
+    if wh is None:
+        return None
+    print(f"  Detected serverless SQL warehouse: {wh.name} ({wh.id})")
     return wh.id
+
+
+def resolve_warehouse_id(w, provided: str | None) -> str:
+    """Return the serverless SQL warehouse ID: flag → prompt (cached/detected default)."""
+    default = get_env_value("MLFLOW_TRACING_SQL_WAREHOUSE_ID")
+    if provided is None and not default:
+        default = detect_serverless_warehouse_id(w)
+    warehouse_id = prompt_value(
+        "Serverless SQL warehouse ID",
+        provided,
+        None,
+        default or "",
+    )
+    if not warehouse_id:
+        sys.exit(
+            "A serverless SQL warehouse ID is required. Create one (or pass "
+            "--warehouse-id) and rerun."
+        )
+    return warehouse_id
 
 
 def resolve_embed_config(w) -> tuple[str, str | None]:
@@ -198,8 +224,8 @@ def main() -> None:
 
     w = WorkspaceClient(profile=profile)
 
-    print("[2/4] Resolving SQL warehouse and UC schema …")
-    warehouse_id = detect_warehouse_id(w, args.warehouse_id)
+    print("[2/4] Resolving serverless SQL warehouse and UC schema …")
+    warehouse_id = resolve_warehouse_id(w, args.warehouse_id)
     os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = warehouse_id
     create_uc_schema(w, warehouse_id, args.catalog, args.schema)
 
