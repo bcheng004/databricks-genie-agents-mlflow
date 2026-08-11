@@ -6,6 +6,7 @@ and uses an LLM to generate specific, copy-paste-ready improvement suggestions.
 
 import json
 import os
+import re
 
 import mlflow
 import streamlit as st
@@ -17,6 +18,26 @@ from common import (
     list_judge_models,
     require_experiment,
 )
+
+
+# Streamlit's st.markdown treats `$...$` as LaTeX math (KaTeX). Analyzer output is
+# full of dollar signs (currency values, thresholds like "revenue over $1000"), so
+# unescaped `$` pairs get swallowed and rendered as math. Escape `$` — but only
+# outside code spans/blocks, where the markdown renderer already ignores it and a
+# literal `\$` would otherwise show through in the code.
+_CODE_SPAN_RE = re.compile(r"(```.*?```|~~~.*?~~~|`[^`\n]+`)", re.DOTALL)
+
+
+def _escape_dollars_outside_code(text: str) -> str:
+    """Escape `$` so it isn't rendered as LaTeX math, leaving code segments as-is."""
+    parts = _CODE_SPAN_RE.split(text)
+    # re.split with a capturing group keeps the matched code segments at odd
+    # indices; escape only the non-code segments at even indices.
+    return "".join(
+        part.replace("$", "\\$") if i % 2 == 0 else part
+        for i, part in enumerate(parts)
+    )
+
 
 st.title("🛠️ Improve Genie Agents")
 st.caption(
@@ -146,7 +167,9 @@ system_prompt = (
     "along with the specific checks that failed. "
     "Generate specific, copy-paste-ready fixes: SQL expressions, text instructions, "
     "example SQL, and column descriptions. "
-    "Never give vague advice. Always write the actual implementation."
+    "Never give vague advice. Always write the actual implementation. "
+    "Format every SQL statement and identifier inside a fenced ```sql code block "
+    "so it renders correctly."
 )
 
 analysis_prompt = f"""Fix the issues found in these Genie conversations.
@@ -165,6 +188,31 @@ SQL expression, example query, or column description that would prevent the fail
 Prioritize by impact."""
 
 
+def _content_to_text(content) -> str:
+    """Coerce a chat completion's ``message.content`` to plain text.
+
+    Most endpoints return a string, but some (e.g. Claude models that emit
+    structured content) return a list of content-part dicts/objects such as
+    ``[{"type": "text", "text": "..."}]``. Concatenate the text parts so the
+    rest of the page (dollar-escaping, ``st.markdown``) always sees a ``str``.
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                parts.append(item.get("text") or item.get("content") or "")
+            else:
+                parts.append(getattr(item, "text", "") or "")
+        return "".join(parts)
+    return str(content)
+
+
 @mlflow.trace
 def analyze_genie_agent(user_prompt: str, sys_prompt: str) -> str:
     response = client.chat.completions.create(
@@ -175,7 +223,7 @@ def analyze_genie_agent(user_prompt: str, sys_prompt: str) -> str:
         ],
         max_tokens=8000,
     )
-    return response.choices[0].message.content
+    return _content_to_text(response.choices[0].message.content)
 
 
 with st.spinner("Asking the LLM to generate improvement suggestions…"):
@@ -186,5 +234,5 @@ with st.spinner("Asking the LLM to generate improvement suggestions…"):
         st.stop()
 
 st.subheader("Improvement Suggestions")
-st.markdown(recommendations)
+st.markdown(_escape_dollars_outside_code(recommendations))
 st.caption("This analysis was traced to your MLflow experiment for future reference.")
