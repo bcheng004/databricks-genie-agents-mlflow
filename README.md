@@ -59,10 +59,10 @@ shown default (in parentheses), or type a value:
 | **Catalog** | Unity Catalog catalog for trace storage. | `main` |
 | **Schema** | UC schema for trace storage (created if missing). | `genie_traces` |
 | **Table prefix** | Prefix for the trace tables. | `evals` |
+| **Serverless SQL warehouse ID** | The serverless SQL warehouse used for MLflow trace queries and schema creation. | cached value, else a detected serverless warehouse |
 
-The SQL warehouse is auto-detected (a Serverless Starter Warehouse if available). The
-resolved config is written to `.env`, `app/app.yaml`, and the `databricks.yml` bundle
-variables.
+The resolved config is written to `.env`, `app/app.yaml`, and the `databricks.yml`
+bundle variables.
 
 Prefer non-interactive (e.g. CI)? Pass any subset of flags to skip those prompts:
 

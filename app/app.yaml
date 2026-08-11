@@ -5,7 +5,7 @@ command:
 
 env:
   - name: MLFLOW_EXPERIMENT_NAME
-    value: "/Workspace/Shared/genie-eval-workshop"
+    value: "/Workspace/Shared/genie-agent-workshop"
   - name: GENIE_AGENT_ID
     value: "01f19467a6d219cfa3a223c678173c59"
   - name: MLFLOW_TRACING_SQL_WAREHOUSE_ID
