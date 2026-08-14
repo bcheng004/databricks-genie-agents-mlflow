@@ -56,10 +56,11 @@ shown default (in parentheses), or type a value:
 | --- | --- | --- |
 | **Select a profile** | The Databricks CLI profile to use. A numbered list of your configured profiles is shown — type the **number**, the **name**, or a **new name** to authenticate as. | your current profile |
 | **Experiment path** | Workspace path for the MLflow experiment (created if missing). | `/Workspace/Shared/genie-eval-traces` |
-| **Catalog** | Unity Catalog catalog for trace storage. | `main` |
-| **Schema** | UC schema for trace storage (created if missing). | `genie_traces` |
-| **Table prefix** | Prefix for the trace tables. | `evals` |
-| **Serverless SQL warehouse ID** | The serverless SQL warehouse used for MLflow trace queries and schema creation. | cached value, else a detected serverless warehouse |
+| **UC-backed MLflow traces?** | `Y` stores traces in a Unity Catalog–managed experiment (asks for catalog / schema / table prefix / warehouse below). `n` uses a plain workspace-backed experiment — traces live in the MLflow backend and the UC/warehouse prompts are skipped. | `Y` |
+| **Catalog** *(UC-backed only)* | Unity Catalog catalog for trace storage. | `main` |
+| **Schema** *(UC-backed only)* | UC schema for trace storage (created if missing). | `genie_traces` |
+| **Table prefix** *(UC-backed only)* | Prefix for the trace tables. | `evals` |
+| **Serverless SQL warehouse ID** *(UC-backed only)* | The serverless SQL warehouse used for MLflow trace queries and schema creation. | cached value, else a detected serverless warehouse |
 
 The resolved config is written to `.env`, `app/app.yaml`, and the `databricks.yml`
 bundle variables.
@@ -67,11 +68,16 @@ bundle variables.
 Prefer non-interactive (e.g. CI)? Pass any subset of flags to skip those prompts:
 
 ```bash
+# UC-backed traces
 uv run quickstart \
   --profile my-workspace \
   --experiment-name /Workspace/Shared/genie-eval-traces \
   --catalog main --schema genie_traces --table-prefix evals \
   --warehouse-id abc123def456
+
+# Workspace-backed traces (no UC tables or warehouse)
+uv run quickstart --profile my-workspace --no-uc-backed \
+  --experiment-name /Workspace/Shared/genie-eval-traces
 ```
 
 Reruns are idempotent — an experiment already at that path is reused. Pass `--force`

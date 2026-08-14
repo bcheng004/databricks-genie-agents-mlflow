@@ -20,6 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 ENV_PATH = REPO_ROOT / ".env"
 ENV_EXAMPLE_PATH = REPO_ROOT / ".env.example"
 APP_YAML_PATH = REPO_ROOT / "app" / "app.yaml"
+APP_RESOURCE_YAML_PATH = REPO_ROOT / "resources" / "genie_mlflow_app.app.yml"
 DATABRICKS_YML_PATH = REPO_ROOT / "databricks.yml"
 
 
@@ -118,6 +119,91 @@ def set_bundle_variable_default(name: str, value: str) -> None:
     if isinstance(variables, dict) and name in variables:
         variables[name]["default"] = DQ(value)
         dump_yaml(y, data, DATABRICKS_YML_PATH)
+
+
+def set_bundle_target_hosts(host: str, targets: list[str] | None = None) -> None:
+    """Set workspace.host for the given databricks.yml targets (all if None).
+
+    Only the host is written — workspace.profile is left as-is. The value is a
+    plain (unquoted) scalar to match the existing host style in databricks.yml.
+    """
+    y, data = load_yaml(DATABRICKS_YML_PATH)
+    tgts = data.get("targets")
+    if not isinstance(tgts, dict):
+        return
+    names = targets if targets is not None else list(tgts.keys())
+    changed = False
+    for name in names:
+        tgt = tgts.get(name)
+        if isinstance(tgt, dict):
+            ws = tgt.setdefault("workspace", {})
+            if isinstance(ws, dict):
+                ws["host"] = host
+                changed = True
+    if changed:
+        dump_yaml(y, data, DATABRICKS_YML_PATH)
+
+
+def set_app_resource_enabled(resource_name: str, enabled: bool) -> None:
+    """Comment out (or restore) a named ``resources:`` list item in the app YAML.
+
+    Toggles the ``- name: <resource_name>`` block in
+    resources/genie_mlflow_app.app.yml by prefixing its lines with ``# `` (or
+    stripping that prefix). Line-based rather than a YAML round-trip so the
+    commented block stays visible and editable, and so re-enabling restores it
+    verbatim. Idempotent: commenting an already-commented block (or enabling an
+    already-active one) is a no-op.
+
+    The block spans the ``- name:`` line and the more-indented lines beneath it,
+    up to the next list item at the same indent or a dedent.
+    """
+    path = APP_RESOURCE_YAML_PATH
+    lines = path.read_text().splitlines()
+
+    # Match the target list item whether it's active ("- name: x") or already
+    # commented ("# - name: x"), capturing its indentation.
+    item_re = re.compile(
+        rf"^(?P<indent>\s*)(?P<hash>#\s*)?-\s+name:\s+{re.escape(resource_name)}\s*$"
+    )
+    start = next((i for i, ln in enumerate(lines) if item_re.match(ln)), None)
+    if start is None:
+        return
+
+    indent = len(item_re.match(lines[start]).group("indent"))
+
+    # The block runs until the next line whose (un-commented) content sits at or
+    # below the list-item indent — i.e. the next sibling item or a dedent.
+    def content_indent(ln: str) -> int | None:
+        stripped = re.sub(r"^(\s*)#\s?", r"\1", ln)  # ignore any comment prefix
+        if not stripped.strip():
+            return None  # blank line — treat as inside the block
+        return len(stripped) - len(stripped.lstrip())
+
+    end = start + 1
+    while end < len(lines):
+        ci = content_indent(lines[end])
+        if ci is not None and ci <= indent:
+            break
+        end += 1
+
+    block = lines[start:end]
+    changed = False
+    if enabled:
+        for i, ln in enumerate(block):
+            m = re.match(r"^(\s*)#\s?(.*)$", ln)
+            if m:
+                block[i] = m.group(1) + m.group(2)
+                changed = True
+    else:
+        for i, ln in enumerate(block):
+            if ln.strip() and not ln.lstrip().startswith("#"):
+                ws = ln[: len(ln) - len(ln.lstrip())]
+                block[i] = f"{ws}# {ln[len(ws):]}"
+                changed = True
+
+    if changed:
+        lines[start:end] = block
+        path.write_text("\n".join(lines) + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -220,3 +306,25 @@ def prompt_value(
         if default:
             return default
         print(f"{label} is required.")
+
+
+def prompt_bool(label: str, provided: bool | None, default: bool = True) -> bool:
+    """Return a yes/no answer, prompting interactively when not supplied.
+
+    Priority: explicit flag (`provided`) → interactive prompt. The prompt shows
+    the default as an uppercase letter (`[Y/n]` when default is True) and Enter
+    accepts it. Anything starting with y/n (case-insensitive) is accepted;
+    anything else re-prompts.
+    """
+    if provided is not None:
+        return provided
+    suffix = " [Y/n]" if default else " [y/N]"
+    while True:
+        choice = input(f"{label}{suffix}: ").strip().lower()
+        if not choice:
+            return default
+        if choice[0] == "y":
+            return True
+        if choice[0] == "n":
+            return False
+        print("Please answer y or n.")

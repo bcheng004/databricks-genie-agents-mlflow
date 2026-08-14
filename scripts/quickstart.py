@@ -1,22 +1,25 @@
-"""Provision the Genie MLflow app's UC-managed experiment and wire up config.
+"""Provision the Genie MLflow app's experiment and wire up config.
 
 This is the CLI port of what used to be the app's Home/Setup page. It:
 
   1. Validates (or interactively creates) a Databricks CLI profile.
-  2. Resolves a serverless SQL warehouse (prompted, defaulting to the one
-     already configured or a detected serverless warehouse) and creates the UC
-     schema for trace storage.
-  3. Creates (or reuses) a Unity Catalog–managed MLflow experiment whose trace
-     location points at that catalog/schema/table-prefix.
+  2. For UC-backed traces, resolves a serverless SQL warehouse (prompted,
+     defaulting to the configured or a detected serverless warehouse) and
+     creates the UC schema for trace storage. Skipped for workspace-backed
+     traces, which need no warehouse or UC tables.
+  3. Creates (or reuses) the MLflow experiment — Unity Catalog–managed (trace
+     location at the catalog/schema/table-prefix) when UC-backed, otherwise a
+     plain workspace-backed experiment whose traces live in the MLflow backend.
   4. Writes the resolved config into .env, app/app.yaml (what the deployed app
-     reads at runtime), and databricks.yml bundle variable defaults.
+     reads at runtime), and databricks.yml bundle variable defaults and target
+     workspace hosts (resolved from the selected profile).
 
 Reruns are idempotent — an experiment recorded in .env is reused as-is.
 
-Run with no flags to be prompted for the profile, experiment path, catalog,
-schema, table prefix, and serverless SQL warehouse ID (each prompt defaults to
-the cached .env value, and the warehouse falls back to a detected serverless
-warehouse):
+Run with no flags to be prompted for the profile, experiment path, whether
+traces are UC-backed, and (for UC-backed) the catalog, schema, table prefix,
+and serverless SQL warehouse ID (each prompt defaults to the cached .env value,
+and the warehouse falls back to a detected serverless warehouse):
 
     uv run quickstart
 
@@ -26,6 +29,10 @@ Or pass any subset of flags to skip those prompts (useful for CI):
         --experiment-name /Workspace/Shared/genie-eval-traces \
         --catalog main --schema genie_traces --table-prefix evals \
         --warehouse-id abc123
+
+    # Workspace-backed traces (no UC tables or warehouse):
+    uv run quickstart --profile mlflow-workshop --no-uc-backed \
+        --experiment-name /Workspace/Shared/genie-eval-traces
 """
 
 from __future__ import annotations
@@ -37,9 +44,12 @@ import sys
 from ._common import (
     ensure_env_file,
     get_env_value,
+    prompt_bool,
     prompt_value,
     resolve_profile,
+    set_app_resource_enabled,
     set_app_yaml_env,
+    set_bundle_target_hosts,
     set_bundle_variable_default,
     update_env_file,
     validate_profile,
@@ -81,6 +91,16 @@ def parse_args() -> argparse.Namespace:
         help="Serverless SQL warehouse ID. Prompted for interactively if "
         "omitted (defaulting to the cached value or a detected serverless "
         "warehouse).",
+    )
+    parser.add_argument(
+        "--uc-backed",
+        dest="uc_backed",
+        default=None,
+        action=argparse.BooleanOptionalAction,
+        help="Store traces in a Unity Catalog–managed experiment (catalog / "
+        "schema / warehouse). Use --no-uc-backed for a plain workspace-backed "
+        "experiment (no UC tables or warehouse). Prompted if omitted (default: "
+        "UC-backed).",
     )
     parser.add_argument(
         "--force",
@@ -160,9 +180,14 @@ def create_uc_schema(w, warehouse_id: str, catalog: str, schema: str) -> None:
 
 
 def create_experiment(args) -> tuple[str, str]:
-    """Create or reuse the UC-managed experiment; return (name, id)."""
+    """Create or reuse the MLflow experiment; return (name, id).
+
+    UC-backed (``args.uc_backed``): traces are stored in a Unity Catalog–managed
+    experiment (catalog / schema / table-prefix), queried at runtime through a
+    SQL warehouse. Otherwise a plain workspace-backed experiment is created —
+    traces live in the MLflow backend and need no UC tables or warehouse.
+    """
     import mlflow
-    from mlflow.entities.trace_location import UnityCatalog
 
     mlflow.set_tracking_uri("databricks")
 
@@ -179,17 +204,23 @@ def create_experiment(args) -> tuple[str, str]:
             return existing.name, existing.experiment_id
 
     print(f"  Configuring experiment {args.experiment_name} …")
-    exp = mlflow.set_experiment(
-        experiment_name=args.experiment_name,
-        trace_location=UnityCatalog(
-            catalog_name=args.catalog,
-            schema_name=args.schema,
-            table_prefix=args.table_prefix or "evals",
-        ),
-    )
-    print(
-        f"    OTel spans table: {exp.trace_location.full_otel_spans_table_name}"
-    )
+    if args.uc_backed:
+        from mlflow.entities.trace_location import UnityCatalog
+
+        exp = mlflow.set_experiment(
+            experiment_name=args.experiment_name,
+            trace_location=UnityCatalog(
+                catalog_name=args.catalog,
+                schema_name=args.schema,
+                table_prefix=args.table_prefix or "evals",
+            ),
+        )
+        print(
+            f"    OTel spans table: {exp.trace_location.full_otel_spans_table_name}"
+        )
+    else:
+        exp = mlflow.set_experiment(experiment_name=args.experiment_name)
+        print("    Workspace-backed experiment (traces stored in MLflow).")
     return args.experiment_name, exp.experiment_id
 
 
@@ -207,34 +238,47 @@ def main() -> None:
         )
     os.environ["DATABRICKS_CONFIG_PROFILE"] = profile
 
-    # Resolve UC trace-location inputs (flag → prompt with cached/fallback default).
     args.experiment_name = prompt_value(
         "Experiment path",
         args.experiment_name,
         "MLFLOW_EXPERIMENT_NAME",
         "/Workspace/Shared/genie-eval-traces",
     )
-    args.catalog = prompt_value("Catalog", args.catalog, "UC_CATALOG", "main")
-    args.schema = prompt_value("Schema", args.schema, "UC_SCHEMA", "genie_traces")
-    args.table_prefix = prompt_value(
-        "Table prefix", args.table_prefix, "UC_TABLE_PREFIX", "evals"
+
+    # UC-backed traces (catalog/schema/warehouse) vs a plain workspace-backed
+    # experiment (traces in the MLflow backend, no UC tables or warehouse).
+    args.uc_backed = prompt_bool(
+        "UC-backed MLflow traces?", args.uc_backed, default=True
     )
+
+    # UC trace-location inputs are only needed for the UC-backed path.
+    if args.uc_backed:
+        args.catalog = prompt_value("Catalog", args.catalog, "UC_CATALOG", "main")
+        args.schema = prompt_value("Schema", args.schema, "UC_SCHEMA", "genie_traces")
+        args.table_prefix = prompt_value(
+            "Table prefix", args.table_prefix, "UC_TABLE_PREFIX", "evals"
+        )
 
     from databricks.sdk import WorkspaceClient
 
     w = WorkspaceClient(profile=profile)
 
-    print("[2/4] Resolving serverless SQL warehouse and UC schema …")
-    warehouse_id = resolve_warehouse_id(w, args.warehouse_id)
-    os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = warehouse_id
-    create_uc_schema(w, warehouse_id, args.catalog, args.schema)
+    warehouse_id = None
+    if args.uc_backed:
+        print("[2/4] Resolving serverless SQL warehouse and UC schema …")
+        warehouse_id = resolve_warehouse_id(w, args.warehouse_id)
+        os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = warehouse_id
+        create_uc_schema(w, warehouse_id, args.catalog, args.schema)
+    else:
+        print("[2/4] Workspace-backed traces — skipping warehouse and UC schema.")
 
     workspace_url, workspace_id = resolve_embed_config(w)
     print(f"  Workspace URL: {workspace_url}")
     if workspace_id:
         print(f"  Workspace ID:  {workspace_id}")
 
-    print("[3/4] Creating / reusing UC-managed MLflow experiment …")
+    kind = "UC-managed" if args.uc_backed else "workspace-backed"
+    print(f"[3/4] Creating / reusing {kind} MLflow experiment …")
     exp_name, exp_id = create_experiment(args)
 
     print("[4/4] Writing config to .env, app/app.yaml, databricks.yml …")
@@ -242,12 +286,18 @@ def main() -> None:
         "DATABRICKS_CONFIG_PROFILE": profile,
         "MLFLOW_EXPERIMENT_NAME": exp_name,
         "MLFLOW_EXPERIMENT_ID": exp_id,
-        "UC_CATALOG": args.catalog,
-        "UC_SCHEMA": args.schema,
-        "UC_TABLE_PREFIX": args.table_prefix,
-        "MLFLOW_TRACING_SQL_WAREHOUSE_ID": warehouse_id,
         "DATABRICKS_WORKSPACE_URL": workspace_url,
     }
+    # UC trace-location keys / warehouse only apply to the UC-backed path.
+    if args.uc_backed:
+        env_updates.update(
+            {
+                "UC_CATALOG": args.catalog,
+                "UC_SCHEMA": args.schema,
+                "UC_TABLE_PREFIX": args.table_prefix,
+                "MLFLOW_TRACING_SQL_WAREHOUSE_ID": warehouse_id,
+            }
+        )
     if workspace_id:
         env_updates["DATABRICKS_WORKSPACE_ID"] = workspace_id
     for key, value in env_updates.items():
@@ -255,13 +305,21 @@ def main() -> None:
 
     app_yaml_env = {
         "MLFLOW_EXPERIMENT_NAME": exp_name,
-        "MLFLOW_TRACING_SQL_WAREHOUSE_ID": warehouse_id,
         "DATABRICKS_WORKSPACE_URL": workspace_url,
     }
+    if args.uc_backed:
+        app_yaml_env["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = warehouse_id
     if workspace_id:
         app_yaml_env["DATABRICKS_WORKSPACE_ID"] = workspace_id
     set_app_yaml_env(app_yaml_env)
-    set_bundle_variable_default("warehouse_id", warehouse_id)
+    if warehouse_id:
+        set_bundle_variable_default("warehouse_id", warehouse_id)
+    if workspace_url:
+        set_bundle_target_hosts(workspace_url)
+    # Workspace-backed traces need no warehouse — comment out the app's
+    # sql-warehouse resource (and restore it when UC-backed) so deploy doesn't
+    # bind a warehouse the app never uses.
+    set_app_resource_enabled("sql-warehouse", args.uc_backed)
 
     print(
         "\nDone. Experiment ready:\n"
