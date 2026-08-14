@@ -27,3 +27,4 @@ uv.lock
 mlflow.db
 .ruff_cache
 mlruns
+config
