@@ -144,26 +144,23 @@ def set_bundle_target_hosts(host: str, targets: list[str] | None = None) -> None
         dump_yaml(y, data, DATABRICKS_YML_PATH)
 
 
-def set_app_resource_enabled(resource_name: str, enabled: bool) -> None:
-    """Comment out (or restore) a named ``resources:`` list item in the app YAML.
+def _toggle_yaml_named_block(path: Path, name: str, enabled: bool) -> None:
+    """Comment out (or restore) a ``- name: <name>`` list item block in a YAML file.
 
-    Toggles the ``- name: <resource_name>`` block in
-    resources/genie_mlflow_app.app.yml by prefixing its lines with ``# `` (or
-    stripping that prefix). Line-based rather than a YAML round-trip so the
-    commented block stays visible and editable, and so re-enabling restores it
-    verbatim. Idempotent: commenting an already-commented block (or enabling an
-    already-active one) is a no-op.
+    Line-based rather than a YAML round-trip so the commented block stays visible
+    and editable, and re-enabling restores it verbatim. Idempotent: commenting an
+    already-commented block (or enabling an already-active one) is a no-op.
 
     The block spans the ``- name:`` line and the more-indented lines beneath it,
-    up to the next list item at the same indent or a dedent.
+    up to the next list item at the same indent or a dedent. Used for both the
+    app's ``resources:`` items and its ``env:`` entries (identical shape).
     """
-    path = APP_RESOURCE_YAML_PATH
     lines = path.read_text().splitlines()
 
     # Match the target list item whether it's active ("- name: x") or already
     # commented ("# - name: x"), capturing its indentation.
     item_re = re.compile(
-        rf"^(?P<indent>\s*)(?P<hash>#\s*)?-\s+name:\s+{re.escape(resource_name)}\s*$"
+        rf"^(?P<indent>\s*)(?P<hash>#\s*)?-\s+name:\s+{re.escape(name)}\s*$"
     )
     start = next((i for i, ln in enumerate(lines) if item_re.match(ln)), None)
     if start is None:
@@ -204,6 +201,21 @@ def set_app_resource_enabled(resource_name: str, enabled: bool) -> None:
     if changed:
         lines[start:end] = block
         path.write_text("\n".join(lines) + "\n")
+
+
+def set_app_resource_enabled(resource_name: str, enabled: bool) -> None:
+    """Comment out (or restore) a named ``resources:`` list item in the app YAML."""
+    _toggle_yaml_named_block(APP_RESOURCE_YAML_PATH, resource_name, enabled)
+
+
+def set_app_yaml_env_enabled(env_name: str, enabled: bool) -> None:
+    """Comment out (or restore) a named ``env:`` entry in app/app.yaml.
+
+    Used for env vars that only apply to one trace-storage mode — e.g.
+    MLFLOW_TRACING_SQL_WAREHOUSE_ID, which is commented out for workspace-backed
+    traces (no warehouse) and restored for UC-backed traces.
+    """
+    _toggle_yaml_named_block(APP_YAML_PATH, env_name, enabled)
 
 
 # ---------------------------------------------------------------------------

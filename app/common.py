@@ -82,50 +82,94 @@ def init_mlflow() -> None:
     mlflow.set_tracking_uri("databricks")
 
 
-@st.cache_data(ttl=600)
-def detect_warehouse_id(_token: str | None = None) -> str | None:
-    """Return a SQL warehouse ID, setting MLFLOW_TRACING_SQL_WAREHOUSE_ID as a side effect.
+_CHAT_TASK = "llm/v1/chat"
 
-    Priority: env var already set → Serverless Starter Warehouse → first warehouse found.
-    _token is included so the cache is keyed per user when OBO is active.
+# Prefix shown before external-model endpoints in model dropdowns. st.selectbox
+# renders option text literally (no per-option markdown/color — verified), so an
+# emoji marker is the way to flag externals visually.
+EXTERNAL_MODEL_MARKER = "🌐"
+
+
+def _is_external_chat_endpoint(endpoint) -> bool:
+    """True if any served entity is an external model exposing a chat task.
+
+    External-model endpoints (OpenAI, Anthropic, Bedrock, etc. proxied through
+    Model Serving) leave the top-level ``endpoint.task`` unset and carry the task
+    on each served entity's ``external_model.task``.
     """
-    existing = os.environ.get("MLFLOW_TRACING_SQL_WAREHOUSE_ID")
-    if existing:
-        return existing
+    config = getattr(endpoint, "config", None)
+    served_entities = getattr(config, "served_entities", None) or []
+    for entity in served_entities:
+        external = getattr(entity, "external_model", None)
+        if external is not None and getattr(external, "task", None) == _CHAT_TASK:
+            return True
+    return False
+
+
+def _is_chat_endpoint(endpoint) -> bool:
+    """True if a serving endpoint exposes a chat interface.
+
+    Native Foundation Model / provisioned-throughput endpoints report the task
+    at the top level (``endpoint.task``); external-model endpoints report it on
+    a served entity (see ``_is_external_chat_endpoint``). Accept either.
+    """
+    return endpoint.task == _CHAT_TASK or _is_external_chat_endpoint(endpoint)
+
+
+@st.cache_data(ttl=600)
+def _list_chat_endpoints(_token: str | None = None) -> tuple[List[str], frozenset[str]]:
+    """Return (model_names, external_names) for chat-capable serving endpoints.
+
+    Names are sorted newest-launched first. ``external_names`` is the subset
+    backed by external providers. A single scan feeds both the option list and
+    the external-vs-native marking, so callers share one cached API call.
+    ``_token`` keys the cache per user when OBO is active.
+
+    Falls back to ``FALLBACK_JUDGE_MODELS`` (all treated as native) on error or
+    when the workspace exposes no chat endpoints.
+    """
     try:
         w = get_workspace_client()
-        warehouses = list(w.warehouses.list())
-        wh = next(
-            (
-                wh
-                for wh in warehouses
-                if "Serverless Starter Warehouse" in (wh.name or "")
-                and wh.enable_serverless_compute
-            ),
-            warehouses[0] if warehouses else None,
-        )
-        if wh:
-            os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = wh.id
-            return wh.id
-    except Exception:
-        pass
-    return None
-
-
-@st.cache_data(ttl=600)
-def list_judge_models(_token: str | None = None) -> List[str]:
-    """List chat-capable Databricks Foundation Model API endpoints, newest first.
-
-    Sorted by the endpoint's creation (launch) date, most recently launched
-    first. _token is included so the cache is keyed per user when OBO is active.
-    """
-    try:
-        w = get_workspace_client()
-        endpoints = [e for e in w.serving_endpoints.list() if e.task == "llm/v1/chat"]
+        endpoints = [e for e in w.serving_endpoints.list() if _is_chat_endpoint(e)]
         endpoints.sort(key=lambda e: e.creation_timestamp or 0, reverse=True)
-        return [e.name for e in endpoints] or FALLBACK_JUDGE_MODELS
+        names = [e.name for e in endpoints]
+        external = frozenset(
+            e.name for e in endpoints if _is_external_chat_endpoint(e)
+        )
+        if not names:
+            return list(FALLBACK_JUDGE_MODELS), frozenset()
+        return names, external
     except Exception:
-        return FALLBACK_JUDGE_MODELS
+        return list(FALLBACK_JUDGE_MODELS), frozenset()
+
+
+def list_judge_models(_token: str | None = None) -> List[str]:
+    """List chat-capable serving endpoint names, newest first.
+
+    Includes native Foundation Model API endpoints and external-model endpoints
+    (external providers proxied through Databricks Model Serving).
+    """
+    names, _ = _list_chat_endpoints(_token)
+    return names
+
+
+def list_external_models(_token: str | None = None) -> frozenset[str]:
+    """Return the subset of chat endpoint names backed by external providers."""
+    _, external = _list_chat_endpoints(_token)
+    return external
+
+
+def format_model_option(name: str, external: frozenset[str] | None = None) -> str:
+    """Format a model name for a selectbox, marking external models.
+
+    Display-only: st.selectbox's ``format_func`` changes the shown label, not
+    the returned value (verified), so the bare ``name`` is what callers get back.
+    Pass the ``external`` set from ``list_external_models()``; when omitted it is
+    fetched (cached).
+    """
+    if external is None:
+        external = list_external_models()
+    return f"{EXTERNAL_MODEL_MARKER} {name}" if name in external else name
 
 
 def require_experiment() -> tuple[str, str]:
@@ -133,14 +177,21 @@ def require_experiment() -> tuple[str, str]:
 
     The experiment is provisioned by the `uv` quickstart and its name is passed
     to the app via the MLFLOW_EXPERIMENT_NAME env var (set in app.yaml). The
-    experiment ID is resolved by name. MLFLOW_TRACING_SQL_WAREHOUSE_ID is also
-    read from the environment so MLflow trace queries work on every page.
+    experiment ID is resolved by name.
+
+    MLFLOW_TRACING_SQL_WAREHOUSE_ID is only relevant for UC-backed traces, whose
+    trace tables are queried through a SQL warehouse. When it is set, we ensure a
+    warehouse is resolved. When it is unset (workspace-backed traces — traces
+    live in the MLflow backend), we deliberately do NOT auto-detect one: doing so
+    would make trace queries run against a warehouse the app has no grant on
+    (the sql-warehouse app resource is removed for workspace-backed traces),
+    yielding a PermissionDenied on the SQL endpoint.
     """
     name = os.environ.get("MLFLOW_EXPERIMENT_NAME")
     if not name:
         st.error(
             "MLFLOW_EXPERIMENT_NAME is not set. Run the `uv` quickstart to "
-            "provision the UC-managed MLflow experiment, then set it in app.yaml."
+            "provision the MLflow experiment, then set it in app.yaml."
         )
         st.stop()
 
@@ -153,8 +204,6 @@ def require_experiment() -> tuple[str, str]:
         )
         st.stop()
 
-    if not os.environ.get("MLFLOW_TRACING_SQL_WAREHOUSE_ID"):
-        detect_warehouse_id(get_obo_token())
     return name, experiment.experiment_id
 
 

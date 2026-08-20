@@ -28,3 +28,4 @@ mlflow.db
 .ruff_cache
 mlruns
 config
+blog

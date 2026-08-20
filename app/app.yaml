@@ -5,11 +5,11 @@ command:
 
 env:
   - name: MLFLOW_EXPERIMENT_NAME
-    value: "/Workspace/Shared/genie-agent-workshop"
+    value: "/Shared/genie-agent-workshop"
   - name: GENIE_AGENT_ID
-    value: "01f19467a6d219cfa3a223c678173c59"
-  - name: MLFLOW_TRACING_SQL_WAREHOUSE_ID
-    value: "9bbc027402111984"
+    value: "01f19b1817411d1fbd9614d6d45562b5"
+  # - name: MLFLOW_TRACING_SQL_WAREHOUSE_ID
+    # value: "9bbc027402111984"
   - name: ANALYZER_MODEL
     value: databricks-claude-sonnet-5
   # Lakebase endpoint backing the code_grounded scorer's BM25 code index.
@@ -18,6 +18,6 @@ env:
   - name: LAKEBASE_ENDPOINT
     valueFrom: postgres
   - name: DATABRICKS_WORKSPACE_URL
-    value: "https://fevm-workshop-guy.cloud.databricks.com"
+    value: "https://fevm-serverless-stable-h911sx.cloud.databricks.com"
   - name: DATABRICKS_WORKSPACE_ID
-    value: "7474659392412718"
+    value: "7474645500368791"

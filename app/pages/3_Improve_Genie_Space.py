@@ -12,9 +12,12 @@ import mlflow
 import streamlit as st
 
 from common import (
+    EXTERNAL_MODEL_MARKER,
+    format_model_option,
     genie_agent_id_input,
     get_openai_client,
     get_workspace_client,
+    list_external_models,
     list_judge_models,
     require_experiment,
 )
@@ -51,6 +54,7 @@ st.info(f"Experiment: `{experiment_name}`")
 space_id = genie_agent_id_input()
 
 analyzer_model_options = list_judge_models()
+_external_models = list_external_models()
 _default_analyzer = os.environ.get("ANALYZER_MODEL", "databricks-claude-sonnet-5")
 analyzer_model = st.selectbox(
     "Analyzer model",
@@ -60,7 +64,11 @@ analyzer_model = st.selectbox(
         if _default_analyzer in analyzer_model_options
         else 0
     ),
-    help="Databricks Foundation Model API endpoint used to generate suggestions.",
+    format_func=lambda m: format_model_option(m, _external_models),
+    help=(
+        "Databricks serving endpoint used to generate suggestions. "
+        f"{EXTERNAL_MODEL_MARKER} marks external-model endpoints."
+    ),
 )
 
 max_failed = st.slider(

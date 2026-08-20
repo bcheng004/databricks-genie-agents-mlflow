@@ -49,6 +49,7 @@ from ._common import (
     resolve_profile,
     set_app_resource_enabled,
     set_app_yaml_env,
+    set_app_yaml_env_enabled,
     set_bundle_target_hosts,
     set_bundle_variable_default,
     update_env_file,
@@ -307,19 +308,27 @@ def main() -> None:
         "MLFLOW_EXPERIMENT_NAME": exp_name,
         "DATABRICKS_WORKSPACE_URL": workspace_url,
     }
-    if args.uc_backed:
-        app_yaml_env["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = warehouse_id
     if workspace_id:
         app_yaml_env["DATABRICKS_WORKSPACE_ID"] = workspace_id
+    # For UC-backed traces the app queries trace tables through a SQL warehouse,
+    # so MLFLOW_TRACING_SQL_WAREHOUSE_ID must be an active env entry. Uncomment it
+    # first (a prior --no-uc-backed run may have commented it) so the upsert below
+    # updates the existing line instead of appending a duplicate.
+    if args.uc_backed:
+        set_app_yaml_env_enabled("MLFLOW_TRACING_SQL_WAREHOUSE_ID", True)
+        app_yaml_env["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = warehouse_id
     set_app_yaml_env(app_yaml_env)
     if warehouse_id:
         set_bundle_variable_default("warehouse_id", warehouse_id)
     if workspace_url:
         set_bundle_target_hosts(workspace_url)
-    # Workspace-backed traces need no warehouse — comment out the app's
-    # sql-warehouse resource (and restore it when UC-backed) so deploy doesn't
-    # bind a warehouse the app never uses.
+    # Workspace-backed traces need no warehouse. Comment out both the app's
+    # sql-warehouse resource and the MLFLOW_TRACING_SQL_WAREHOUSE_ID env entry
+    # (restored when UC-backed) so neither deploy binds nor runtime queries a
+    # warehouse the app has no grant on.
     set_app_resource_enabled("sql-warehouse", args.uc_backed)
+    if not args.uc_backed:
+        set_app_yaml_env_enabled("MLFLOW_TRACING_SQL_WAREHOUSE_ID", False)
 
     print(
         "\nDone. Experiment ready:\n"
