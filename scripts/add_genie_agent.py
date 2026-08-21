@@ -110,8 +110,15 @@ def create_agent(w, args) -> str:
         "Description", args.description, fallback=_DEFAULT_DESCRIPTION
     )
 
+    # `version` is required: the export converter accepts only versions 1 and 2,
+    # and a missing field is read as 0 ("Invalid export proto ... but got 0").
+    # `data_sources.tables` must be sorted by identifier.
     serialized_agent = {
-        "data_sources": {"tables": [{"identifier": t} for t in tables]},
+        "version": 2,
+        "config": {"sample_questions": []},
+        "data_sources": {
+            "tables": [{"identifier": t} for t in sorted(tables)]
+        },
         "instructions": {"text_instructions": [], "example_question_sqls": []},
     }
     print(f"  Creating Genie agent '{title}' with {len(tables)} table(s) …")
