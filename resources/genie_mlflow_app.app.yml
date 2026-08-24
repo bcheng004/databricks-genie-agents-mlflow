@@ -13,11 +13,11 @@ resources:
         # code_grounded scorer reads the code index under the caller's grants.
         - postgres
       resources:
-        - name: sql-warehouse
-          description: "Warehouse used for MLflow trace queries and schema creation."
-          sql_warehouse:
-            id: ${var.warehouse_id}
-            permission: CAN_USE
+        # - name: sql-warehouse
+          # description: "Warehouse used for MLflow trace queries and schema creation."
+          # sql_warehouse:
+            # id: ${var.warehouse_id}
+            # permission: CAN_USE
         - name: judge-model
           description: "Foundation model endpoint used as the default LLM judge."
           serving_endpoint:

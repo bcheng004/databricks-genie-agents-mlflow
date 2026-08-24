@@ -27,9 +27,12 @@ from code_search import (
     source_links,
 )
 from common import (
+    EXTERNAL_MODEL_MARKER,
+    format_model_option,
     get_guideline_judges,
     get_openai_client,
     get_workspace_client,
+    list_external_models,
     list_judge_models,
     require_experiment,
 )
@@ -207,16 +210,25 @@ else:
 # ---------------------------------------------------------------------------
 st.subheader("Step 3 — Judges & scorers")
 judge_model_options = ["Default"] + list_judge_models()
+_external_models = list_external_models()
 
 
 def _model_kwargs(choice: str) -> dict:
     return {} if choice == "Default" else {"model": f"databricks:/{choice}"}
 
 
+def _format_judge_option(choice: str) -> str:
+    # "Default" is a sentinel, not a model name; format_model_option passes it
+    # through since it isn't in the external set.
+    return format_model_option(choice, _external_models)
+
+
 st.markdown("**Built-in judges**")
+st.caption(f"{EXTERNAL_MODEL_MARKER} marks external-model endpoints.")
 builtin_judge_model = st.selectbox(
     "Model for built-in judges (Default uses each judge's built-in model)",
     judge_model_options,
+    format_func=_format_judge_option,
     key="builtin_judge_model",
 )
 use_relevance = st.checkbox("RelevanceToQuery", value=False)
@@ -226,6 +238,7 @@ st.markdown("**Guidelines judges**")
 guideline_judge_model = st.selectbox(
     "Model for Guidelines judges (Default uses each judge's built-in model)",
     judge_model_options,
+    format_func=_format_judge_option,
     key="guideline_judge_model",
 )
 guideline_judges = get_guideline_judges()
@@ -260,8 +273,12 @@ if use_code_grounded:
         "Model for code_grounded judge",
         code_grounded_options,
         index=code_grounded_default_index,
+        format_func=_format_judge_option,
         key="code_grounded_model",
-        help="Foundation Model endpoint used to judge groundedness against the retrieved code.",
+        help=(
+            "Serving endpoint used to judge groundedness against the retrieved "
+            f"code. {EXTERNAL_MODEL_MARKER} marks external-model endpoints."
+        ),
     )
     code_grounded_top_k = st.slider(
         "Code snippets to retrieve per question",
