@@ -1,5 +1,6 @@
 """Shared helpers used by every page of the Genie MLflow app."""
 
+import logging
 import os
 from typing import List
 
@@ -7,6 +8,8 @@ import mlflow
 import streamlit as st
 from databricks.sdk import WorkspaceClient
 from databricks_openai import DatabricksOpenAI
+
+logger = logging.getLogger(__name__)
 
 # Env vars the Databricks Apps runtime sets for the service principal (OAuth M2M).
 # They must be absent when constructing an OBO client, otherwise the SDK raises
@@ -30,11 +33,40 @@ FALLBACK_JUDGE_MODELS = [
 
 
 def get_obo_token() -> str | None:
-    """Return the OBO access token forwarded by Databricks Apps, or None when running locally."""
+    """Return the OBO access token forwarded by Databricks Apps, or None when running locally.
+
+    Streamlit's header map is case-insensitive, but we look the header up under both
+    casings defensively in case that behavior ever changes.
+    """
     try:
-        return st.context.headers.get("X-Forwarded-Access-Token")
+        headers = st.context.headers
     except Exception:
         return None
+    if not headers:
+        return None
+    for key in ("X-Forwarded-Access-Token", "x-forwarded-access-token"):
+        token = headers.get(key)
+        if token:
+            return token
+    return None
+
+
+def _resolve_workspace_host() -> str:
+    """Workspace URL used to construct an OBO client.
+
+    ``DATABRICKS_HOST`` is auto-injected by the Databricks Apps runtime;
+    ``DATABRICKS_WORKSPACE_URL`` is set explicitly in app.yaml as a backstop.
+    """
+    return (
+        os.environ.get("DATABRICKS_HOST")
+        or os.environ.get("DATABRICKS_WORKSPACE_URL")
+        or ""
+    ).strip()
+
+
+def _in_databricks_apps() -> bool:
+    """True when running inside the Databricks Apps runtime (SP creds injected)."""
+    return bool(os.environ.get("DATABRICKS_APP_NAME"))
 
 
 def _clean_env_for_obo() -> dict:
@@ -50,18 +82,32 @@ def _clean_env_for_obo() -> dict:
 def get_workspace_client() -> WorkspaceClient:
     """Return a WorkspaceClient authenticated as the logged-in user (OBO) in Databricks Apps.
 
-    Strips SP OAuth env vars before construction so the SDK does not see multiple
-    auth methods simultaneously. Falls back to default credential resolution locally.
+    In the Apps runtime the forwarded on-behalf-of-user token is required: falling back
+    to the app's service principal authenticates as a principal that is NOT a member of
+    the ``users`` group Foundation Model endpoints are granted to, so
+    ``serving_endpoints.list()`` returns nothing and callers silently degrade to the
+    fallback model list. Raise instead, so the misconfiguration surfaces in the logs
+    rather than showing wrong data. Strips SP OAuth env vars before construction so the
+    SDK does not see multiple auth methods simultaneously. Locally (no forwarded header)
+    fall back to default credential resolution (profile/env).
     """
     token = get_obo_token()
-    host = os.environ.get("DATABRICKS_HOST", "")
+    host = _resolve_workspace_host()
     if token and host:
         removed = _clean_env_for_obo()
         try:
-            client = WorkspaceClient(host=host, token=token)
+            return WorkspaceClient(host=host, token=token)
         finally:
             os.environ.update(removed)
-        return client
+    if _in_databricks_apps():
+        raise RuntimeError(
+            "No on-behalf-of-user token available in the Databricks Apps runtime "
+            f"(token={'present' if token else 'missing'}, host={host or 'unset'!r}). "
+            "The app must authenticate as the logged-in user; refusing to fall back to "
+            "the service principal, which cannot list Foundation Model endpoints. "
+            "Enable user authorization on the workspace and declare the required "
+            "user_api_scopes (model-serving, genie, sql, postgres)."
+        )
     return WorkspaceClient()
 
 
@@ -137,9 +183,14 @@ def _list_chat_endpoints(_token: str | None = None) -> tuple[List[str], frozense
             e.name for e in endpoints if _is_external_chat_endpoint(e)
         )
         if not names:
+            logger.warning(
+                "serving_endpoints.list() returned no chat endpoints (identity may "
+                "lack CAN_VIEW / not be in the users group); using fallback list."
+            )
             return list(FALLBACK_JUDGE_MODELS), frozenset()
         return names, external
     except Exception:
+        logger.exception("Failed to list chat serving endpoints; using fallback list.")
         return list(FALLBACK_JUDGE_MODELS), frozenset()
 
 
